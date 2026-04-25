@@ -48,6 +48,14 @@ git push -u origin main
 2. `JWT_SECRET` env qo'ying.
 3. Deploy qiling.
 
+### Vercel (Serverless)
+1. Create a new project in Vercel and link your GitHub repo.
+2. In Vercel Project Settings -> Environment Variables, add:
+   - `FIREBASE_SERVICE_ACCOUNT` = the full JSON contents of your Firebase service account (paste as single-line JSON)
+   - `JWT_SECRET` = a strong random secret
+3. Build & Run settings: set the Root to the repo root and the command to `npm start` (or use Vercel's default for Node).
+4. Deploy. If your function crashes, check Vercel function logs to see errors (most often missing FIREBASE_SERVICE_ACCOUNT or invalid JSON).
+
 ## 5) Muhim
 
 - `data/` papka server bazasi uchun (`SQLite`), `.gitignore`da ignore qilingan.

@@ -30,15 +30,29 @@ function safeJsonParse(value, fallback) {
 
 async function initDb() {
   // Firebase ni ishga tushirish
-  const serviceAccount = require("./firebase-config.json");
-  
-  // Check if credentials are placeholder
-  if (serviceAccount.project_id === "SIZNING_PROJECT_ID") {
-    console.error("❌ Firebase config not set! Please edit firebase-config.json");
-    console.error("   1. Go to Firebase Console → Project Settings → Service accounts");
-    console.error("   2. Generate new private key");
-    console.error("   3. Replace firebase-config.json with your credentials");
-    process.exit(1);
+  let serviceAccount;
+  // Prefer service account JSON from environment (useful for serverless / Vercel)
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    try {
+      serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    } catch (err) {
+      console.error('❌ FIREBASE_SERVICE_ACCOUNT is set but JSON.parse failed:', err.message || err);
+      throw err;
+    }
+  } else {
+    // fallback to local file (development)
+    try {
+      serviceAccount = require("./firebase-config.json");
+    } catch (err) {
+      console.error('❌ Firebase service account not found. Provide FIREBASE_SERVICE_ACCOUNT env or include firebase-config.json');
+      throw err;
+    }
+  }
+
+  // Check for obvious placeholder or missing project id
+  if (!serviceAccount || serviceAccount.project_id === "SIZNING_PROJECT_ID" || !serviceAccount.project_id) {
+    console.error("❌ Firebase config not set or invalid! Provide proper service account JSON via FIREBASE_SERVICE_ACCOUNT env or firebase-config.json");
+    throw new Error('Firebase credentials missing or invalid');
   }
 
   admin.initializeApp({
