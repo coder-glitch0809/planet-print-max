@@ -560,6 +560,18 @@
     function msg(node, text, cls) { node.className = "msg " + (cls || ""); node.textContent = text || ""; }
 
     // Firebase-based API functions
+    async function fetchJson(path, options = {}, timeoutMs = 20000) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const resp = await fetch(path, { ...options, signal: controller.signal });
+        const data = await resp.json().catch(() => ({}));
+        return { resp, data };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
     async function apiRequest(path, options = {}, auth = true) {
       // For now, use server API - Firebase client will be added for direct access
       const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
@@ -567,8 +579,7 @@
         const token = localStorage.getItem(TOKEN_KEY);
         if (token) headers.Authorization = `Bearer ${token}`;
       }
-      const resp = await fetch(path, { ...options, headers });
-      const data = await resp.json().catch(() => ({}));
+      const { resp, data } = await fetchJson(path, { ...options, headers });
       if (!resp.ok) throw new Error(data.error || "Server xatoligi");
       return data;
     }
@@ -1071,15 +1082,19 @@
         const username = clean(el.loginUser.value), password = el.loginPass.value;
         msg(el.loginMsg, "Tekshirilmoqda...", "warn");
         try {
-          const resp = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
-          const data = await resp.json().catch(() => ({}));
+          const { resp, data } = await fetchJson('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+          });
           if (!resp.ok) return msg(el.loginMsg, data.error || 'Login failed', 'err');
           localStorage.setItem(TOKEN_KEY, data.token);
           msg(el.loginMsg, "", "");
           openDashboard(data.user);
           await loadSessionData();
         } catch (err) {
-          msg(el.loginMsg, err.message || "Server bilan aloqa yo'q", 'err');
+          const text = err.name === "AbortError" ? "Server javob bermadi. Vercel/Firebase sozlamasini tekshiring." : (err.message || "Server bilan aloqa yo'q");
+          msg(el.loginMsg, text, 'err');
         }
       });
 
