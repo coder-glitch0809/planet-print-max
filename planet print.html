@@ -1054,7 +1054,8 @@
           const data = await resp.json();
           if (!resp.ok) return msg(el.loginMsg, data.error || 'Login failed', 'err');
           localStorage.setItem(TOKEN_KEY, data.token);
-          await bootSession();
+          loginSuccess(data.user);
+          await loadSessionData();
         } catch (err) {
           msg(el.loginMsg, err.message, 'err');
         }
@@ -1199,13 +1200,22 @@
       try {
         const data = await apiRequest("/api/auth/me");
         state.currentUser = data.user;
-        if (state.currentUser.role === "super_admin") await loadUsers();
-        await loadFinance();
         loginSuccess(data.user);
+        await loadSessionData();
         return true;
       } catch {
         localStorage.removeItem(TOKEN_KEY);
         return false;
+      }
+    }
+
+    async function loadSessionData() {
+      try {
+        if (state.currentUser?.role === "super_admin") await loadUsers();
+        await loadFinance();
+        refreshAll();
+      } catch (err) {
+        console.error("Session data load error:", err);
       }
     }
 
@@ -1216,6 +1226,7 @@
       setTheme(localStorage.getItem(THEME_KEY) || "light");
       el.eDate.value = today();
       toggleExpenseTypeInputs();
+      await bootSession();
 
       // Check setup status from server (first-time super admin)
       try {
