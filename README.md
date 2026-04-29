@@ -51,10 +51,18 @@ git push -u origin main
 ### Vercel (Serverless)
 1. Create a new project in Vercel and link your GitHub repo.
 2. In Vercel Project Settings -> Environment Variables, add:
-   - `FIREBASE_SERVICE_ACCOUNT` = the full JSON contents of your Firebase service account (paste as single-line JSON)
+   - `FIREBASE_SERVICE_ACCOUNT_BASE64` = base64 encoded full JSON contents of a fresh Firebase service account key
    - `JWT_SECRET` = a strong random secret
 3. Build & Run settings: keep Root Directory as the repo root. Do not set `package-lock.json` as a Vercel config file; the config file is `vercel.json`.
 4. Deploy. If your function crashes, check Vercel function logs to see errors (most often missing `FIREBASE_SERVICE_ACCOUNT` or invalid JSON).
+
+Firebase credential tekshirish:
+
+```bash
+node scripts/test_firebase_credentials.js
+```
+
+`invalid_grant: Invalid JWT Signature` chiqsa, service account private key yaroqsiz. Firebase Console -> Project settings -> Service accounts -> Generate new private key qilib yangi JSON yarating va Vercel envga qayta kiriting.
 
 ## 5) Muhim
 

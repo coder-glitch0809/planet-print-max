@@ -11,6 +11,20 @@ const JWT_SECRET = process.env.JWT_SECRET || "planet_print_change_me";
 const FALLBACK_ADMIN_USER = process.env.SUPER_USER || "Superadmin";
 const FALLBACK_ADMIN_PASS = process.env.SUPER_PASS || "Planet2026";
 
+function clearDeadLocalProxy() {
+  const proxyKeys = [
+    "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
+    "ALL_PROXY", "all_proxy", "GIT_HTTP_PROXY", "GIT_HTTPS_PROXY"
+  ];
+  for (const key of proxyKeys) {
+    if (String(process.env[key] || "").includes("127.0.0.1:9")) {
+      delete process.env[key];
+    }
+  }
+}
+
+clearDeadLocalProxy();
+
 const DEFAULT_FINANCE = {
   projects: [],
   workers: [],
@@ -38,13 +52,31 @@ function safeJsonParse(value, fallback) {
   }
 }
 
+function normalizeServiceAccount(serviceAccount) {
+  if (!serviceAccount || typeof serviceAccount !== "object") return serviceAccount;
+  if (typeof serviceAccount.private_key === "string") {
+    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
+  }
+  return serviceAccount;
+}
+
 async function initDb() {
   let serviceAccount = null;
 
   // 1. Environment Variable orqali tekshirish (Vercel uchun eng asosiysi)
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+    try {
+      const decoded = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, "base64").toString("utf8");
+      serviceAccount = normalizeServiceAccount(JSON.parse(decoded));
+      console.log("Firebase loaded from FIREBASE_SERVICE_ACCOUNT_BASE64");
+    } catch (err) {
+      console.error("FIREBASE_SERVICE_ACCOUNT_BASE64 parse xatosi:", err.message);
+    }
+  }
+
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     try {
-      serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      serviceAccount = normalizeServiceAccount(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT));
       console.log("✅ Firebase loaded from Environment Variables");
     } catch (err) {
       console.error('❌ FIREBASE_SERVICE_ACCOUNT parse xatosi:', err.message);
@@ -56,7 +88,7 @@ async function initDb() {
     const configPath = path.join(__dirname, "firebase-config.json");
     if (fs.existsSync(configPath)) {
       try {
-        serviceAccount = require("./firebase-config.json");
+        serviceAccount = normalizeServiceAccount(require("./firebase-config.json"));
         console.log("✅ Firebase loaded from local firebase-config.json");
       } catch (err) {
         console.error("❌ local firebase-config.json o'qishda xato:", err.message);
@@ -215,7 +247,9 @@ app.post("/api/auth/login", async (req, res) => {
   const login = sanitizeText(req.body?.username, 128);
   const password = String(req.body?.password || "");
 
-  if (!login || !password) return res.status(400).json({ error: "Login va parol kiriting" });
+  if (!login && !password) return res.status(400).json({ error: "Login ham, parol ham kiritilmagan" });
+  if (!login) return res.status(400).json({ error: "Login kiritilmagan" });
+  if (!password) return res.status(400).json({ error: "Parol kiritilmagan" });
 
   try {
     const loginVariants = Array.from(new Set([
@@ -242,14 +276,26 @@ app.post("/api/auth/login", async (req, res) => {
       );
     }
 
-    if (!usersSnapshot || usersSnapshot.empty) return res.status(401).json({ error: "Login yoki parol xato" });
+    if (!usersSnapshot || usersSnapshot.empty) {
+      return res.status(404).json({
+        error: `Bunday login topilmadi: ${login}. Katta-kichik harfni ham tekshiring yoki email bilan urinib ko'ring.`
+      });
+    }
 
     const userDoc = usersSnapshot.docs[0];
     const user = { id: userDoc.id, ...userDoc.data() };
-    if (!user.passHash) return res.status(401).json({ error: "Login yoki parol xato" });
+    if (!user.passHash) {
+      return res.status(401).json({
+        error: `Foydalanuvchi topildi, lekin parol hash saqlanmagan: ${user.username || login}. Parolni qayta o'rnating.`
+      });
+    }
     
     const ok = await bcrypt.compare(password, user.passHash);
-    if (!ok) return res.status(401).json({ error: "Login yoki parol xato" });
+    if (!ok) {
+      return res.status(401).json({
+        error: `Parol noto'g'ri. Login topildi: ${user.username || login}.`
+      });
+    }
 
     sendLogin(res, user);
   } catch (err) {
@@ -257,7 +303,9 @@ app.post("/api/auth/login", async (req, res) => {
     if (login === FALLBACK_ADMIN_USER && password === FALLBACK_ADMIN_PASS) {
       return sendLogin(res, fallbackAdminUser());
     }
-    res.status(503).json({ error: "Firebase bilan aloqa yo'q. Birozdan keyin qayta urinib ko'ring." });
+    res.status(503).json({
+      error: `Firebase bilan aloqa yo'q: ${err.message}. Vercel Environment Variables va Firebase service account sozlamasini tekshiring.`
+    });
   }
 });
 
