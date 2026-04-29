@@ -53,8 +53,8 @@ git push -u origin main
 2. In Vercel Project Settings -> Environment Variables, add:
    - `FIREBASE_SERVICE_ACCOUNT` = the full JSON contents of your Firebase service account (paste as single-line JSON)
    - `JWT_SECRET` = a strong random secret
-3. Build & Run settings: set the Root to the repo root and the command to `npm start` (or use Vercel's default for Node).
-4. Deploy. If your function crashes, check Vercel function logs to see errors (most often missing FIREBASE_SERVICE_ACCOUNT or invalid JSON).
+3. Build & Run settings: keep Root Directory as the repo root. Do not set `package-lock.json` as a Vercel config file; the config file is `vercel.json`.
+4. Deploy. If your function crashes, check Vercel function logs to see errors (most often missing `FIREBASE_SERVICE_ACCOUNT` or invalid JSON).
 
 ## 5) Muhim
 

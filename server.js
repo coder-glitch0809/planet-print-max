@@ -68,15 +68,6 @@ async function initDb() {
   }
 
   firestore = admin.firestore();
-  
-  // Firestore'da default ma'lumotlarni tekshirish
-  const financeDoc = await firestore.collection("settings").doc("finance").get();
-  if (!financeDoc.exists) {
-    await firestore.collection("settings").doc("finance").set({
-      data: DEFAULT_FINANCE,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
-  }
 }
 
 // --- Middlewares & Helpers ---
@@ -122,6 +113,18 @@ function sanitizeText(text, max = 120) {
 
 app.use(express.json({ limit: "5mb" }));
 app.use(express.static(__dirname));
+
+const dbReady = initDb();
+
+app.use("/api", async (_req, res, next) => {
+  try {
+    await dbReady;
+    next();
+  } catch (err) {
+    console.error("Firebase startup failed:", err.message);
+    res.status(500).json({ error: "Server database is not configured" });
+  }
+});
 
 // --- API Routes ---
 
@@ -340,7 +343,8 @@ app.get("*", (_req, res) => {
 });
 
 // Serverni ishga tushirish
-initDb()
+if (require.main === module) {
+  dbReady
   .then(() => {
     app.listen(PORT, () => {
       console.log(`✅ Planet Print server is live on port ${PORT}`);
@@ -351,3 +355,6 @@ initDb()
     // Vercel kabi muhitlarda portlashni oldini olish uchun jarayonni darhol to'xtatmaymiz (ixtiyoriy)
     // process.exit(1); 
   });
+}
+
+module.exports = app;

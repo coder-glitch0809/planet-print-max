@@ -7,7 +7,6 @@
   <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
   <script>
     // Firebase configuration - replace with your config
     const firebaseConfig = {
@@ -22,7 +21,6 @@
     // Initialize Firebase
     firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth();
-    const db = firebase.firestore();
   </script>
   <style>
     :root {
@@ -583,124 +581,32 @@
       return data;
     }
 
-    // Firebase Firestore functions
-    async function fbLoadFinance() {
-      try {
-        const doc = await db.collection("settings").doc("finance").get();
-        if (doc.exists) {
-          const data = doc.data();
-          return data.data || DEFAULT_FINANCE;
-        }
-        return DEFAULT_FINANCE;
-      } catch (e) {
-        console.error("Firebase load finance error:", e);
-        throw e;
-      }
-    }
-
-    async function fbSaveFinance(finance) {
-      try {
-        await db.collection("settings").doc("finance").set({
-          data: finance,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        return true;
-      } catch (e) {
-        console.error("Firebase save finance error:", e);
-        throw e;
-      }
-    }
-
-    async function fbLoadUsers() {
-      try {
-        const snapshot = await db.collection("users").orderBy("createdAt", "asc").get();
-        return snapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            username: data.username,
-            role: data.role,
-            permissions: typeof data.permissions === 'string' ? JSON.parse(data.permissions) : (data.permissions || []),
-            createdAt: data.createdAt?.toMillis?.() || Date.now()
-          };
-        });
-      } catch (e) {
-        console.error("Firebase load users error:", e);
-        throw e;
-      }
-    }
-
-    async function fbCreateUser(userData) {
-      try {
-        const id = uid();
-        await db.collection("users").doc(id).set({
-          ...userData,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        return id;
-      } catch (e) {
-        console.error("Firebase create user error:", e);
-        throw e;
-      }
-    }
-
-    async function fbDeleteUser(id) {
-      try {
-        await db.collection("users").doc(id).delete();
-        return true;
-      } catch (e) {
-        console.error("Firebase delete user error:", e);
-        throw e;
-      }
-    }
-
     async function loadFinance() {
       try {
-        // Try Firebase first, fallback to server API
-        const saved = await fbLoadFinance();
+        const data = await apiRequest("/api/finance");
+        const saved = data.finance || {};
         state.finance.projects = Array.isArray(saved.projects) ? saved.projects : [];
         state.finance.workers = Array.isArray(saved.workers) ? saved.workers : [];
         state.finance.founders = Array.isArray(saved.founders) ? saved.founders : [];
         state.finance.expenses = Array.isArray(saved.expenses) ? saved.expenses : [];
         state.finance.settings = { tax: num(saved.settings?.tax), reserve: num(saved.settings?.reserve), other: num(saved.settings?.other) };
       } catch {
-        // Fallback to server API
-        try {
-          const data = await apiRequest("/api/finance");
-          const saved = data.finance || {};
-          state.finance.projects = Array.isArray(saved.projects) ? saved.projects : [];
-          state.finance.workers = Array.isArray(saved.workers) ? saved.workers : [];
-          state.finance.founders = Array.isArray(saved.founders) ? saved.founders : [];
-          state.finance.expenses = Array.isArray(saved.expenses) ? saved.expenses : [];
-          state.finance.settings = { tax: num(saved.settings?.tax), reserve: num(saved.settings?.reserve), other: num(saved.settings?.other) };
-        } catch {
-          state.finance = { projects: [], workers: [], founders: [], expenses: [], settings: { tax: 0, reserve: 0, other: 0 } };
-        }
+        state.finance = { projects: [], workers: [], founders: [], expenses: [], settings: { tax: 0, reserve: 0, other: 0 } };
       }
     }
     async function saveFinance() {
       try {
-        // Try Firebase first, fallback to server API
-        await fbSaveFinance(state.finance);
-      } catch {
-        try {
-          await apiRequest("/api/finance", { method: "PUT", body: JSON.stringify({ finance: state.finance }) });
-        } catch (e) {
-          console.error(e);
-        }
+        await apiRequest("/api/finance", { method: "PUT", body: JSON.stringify({ finance: state.finance }) });
+      } catch (e) {
+        console.error("Server save finance error:", e);
       }
     }
     async function loadUsers() {
       try {
-        // Try Firebase first, fallback to server API
-        state.users = await fbLoadUsers();
+        const data = await apiRequest("/api/users");
+        state.users = Array.isArray(data.users) ? data.users : [];
       } catch {
-        try {
-          const data = await apiRequest("/api/users");
-          state.users = Array.isArray(data.users) ? data.users : [];
-        } catch {
-          state.users = [];
-        }
+        state.users = [];
       }
     }
 
@@ -1122,7 +1028,7 @@
   if (el.loginShow) el.loginShow.addEventListener("change", () => { el.loginPass.type = el.loginShow.checked ? "text" : "password"; });
   if (el.uShowPass) el.uShowPass.addEventListener("change", () => { el.uPass.type = el.uShowPass.checked ? "text" : "password"; });
 
-      // Super admin yaratish (Firebase Auth + Firestore)
+      // Super admin yaratish server API orqali
       el.setupForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         const username = clean(el.setupUser.value), email = (el.setupEmail && el.setupEmail.value) ? el.setupEmail.value.trim() : '', password = el.setupPass.value;
@@ -1310,31 +1216,6 @@
       setTheme(localStorage.getItem(THEME_KEY) || "light");
       el.eDate.value = today();
       toggleExpenseTypeInputs();
-
-      // Firebase auth state observer
-      auth.onAuthStateChanged(async (user) => {
-        if (user) {
-          // Firestore'dan user ma'lumotini yuklash
-          const username = user.email.replace("@planetprint.local", "");
-          // Foydalanuvchini Firestore users kolleksiyasidan topamiz
-          const users = await fbLoadUsers();
-          const found = users.find(u => u.username === username);
-          if (found) {
-            loginSuccess(found);
-            await loadFinance();
-            if (found.role === "super_admin") await loadUsers();
-            msg(el.loginMsg, "", "");
-          } else {
-            // Agar user Firestore'da topilmasa, chiqib ketadi
-            await auth.signOut();
-            el.appSection.classList.add("hidden");
-            el.authSection.classList.remove("hidden");
-          }
-        } else {
-          el.appSection.classList.add("hidden");
-          el.authSection.classList.remove("hidden");
-        }
-      });
 
       // Check setup status from server (first-time super admin)
       try {
