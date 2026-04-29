@@ -176,10 +176,13 @@ app.post("/api/auth/setup", async (req, res) => {
 });
 
 app.post("/api/auth/login", async (req, res) => {
-  const username = sanitizeText(req.body?.username, 32);
+  const login = sanitizeText(req.body?.username, 128);
   const password = String(req.body?.password || "");
 
-  const usersSnapshot = await firestore.collection("users").where("username", "==", username).limit(1).get();
+  let usersSnapshot = await firestore.collection("users").where("username", "==", login).limit(1).get();
+  if (usersSnapshot.empty && login.includes("@")) {
+    usersSnapshot = await firestore.collection("users").where("email", "==", login).limit(1).get();
+  }
   if (usersSnapshot.empty) return res.status(401).json({ error: "Login yoki parol xato" });
 
   const userDoc = usersSnapshot.docs[0];

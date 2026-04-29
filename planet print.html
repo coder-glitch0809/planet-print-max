@@ -650,6 +650,28 @@
       });
     }
 
+    function openDashboard(user) {
+      state.currentUser = {
+        id: user?.id || "",
+        username: user?.username || "user",
+        role: user?.role || "viewer",
+        permissions: Array.isArray(user?.permissions) ? user.permissions : ["dashboard"]
+      };
+      el.authSection.classList.add("hidden");
+      el.appSection.classList.remove("hidden");
+      el.userBadge.textContent = `User: ${state.currentUser.username} (${state.currentUser.role})`;
+      el.timeBadge.textContent = new Date().toLocaleString("uz-UZ");
+      el.welcomeLine.textContent = "Xush kelibsiz. Bu panel login orqali himoyalangan.";
+      renderTabs();
+      el.pages.forEach((x) => x.classList.remove("active"));
+      document.getElementById("dashboard").classList.add("active");
+      const firstTab = el.tabs.querySelector('[data-page="dashboard"]');
+      if (firstTab) {
+        Array.from(el.tabs.querySelectorAll(".tab")).forEach((b) => b.classList.remove("active"));
+        firstTab.classList.add("active");
+      }
+    }
+
     function workerAdvanceById() {
       const map = {};
       state.finance.expenses.forEach((e) => {
@@ -998,14 +1020,12 @@
     }
 
     function loginSuccess(user) {
-      state.currentUser = { id: user.id, username: user.username, role: user.role, permissions: user.permissions || [] };
-      el.authSection.classList.add("hidden");
-      el.appSection.classList.remove("hidden");
-      el.userBadge.textContent = `User: ${user.username} (${user.role})`;
-      el.timeBadge.textContent = new Date().toLocaleString("uz-UZ");
-      el.welcomeLine.textContent = "Xush kelibsiz. Bu panel login orqali himoyalangan.";
-      renderTabs();
-      refreshAll();
+      openDashboard(user);
+      try {
+        refreshAll();
+      } catch (err) {
+        console.error("Initial render error:", err);
+      }
     }
     function logout() {
       localStorage.removeItem(TOKEN_KEY);
@@ -1049,15 +1069,17 @@
       el.loginForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         const username = clean(el.loginUser.value), password = el.loginPass.value;
+        msg(el.loginMsg, "Tekshirilmoqda...", "warn");
         try {
           const resp = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
-          const data = await resp.json();
+          const data = await resp.json().catch(() => ({}));
           if (!resp.ok) return msg(el.loginMsg, data.error || 'Login failed', 'err');
           localStorage.setItem(TOKEN_KEY, data.token);
-          loginSuccess(data.user);
+          msg(el.loginMsg, "", "");
+          openDashboard(data.user);
           await loadSessionData();
         } catch (err) {
-          msg(el.loginMsg, err.message, 'err');
+          msg(el.loginMsg, err.message || "Server bilan aloqa yo'q", 'err');
         }
       });
 
