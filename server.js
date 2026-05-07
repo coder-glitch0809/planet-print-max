@@ -32,8 +32,14 @@ const DEFAULT_FINANCE = {
   expenses: [],
   settings: { tax: 0, reserve: 0, other: 0 }
 };
+const FINANCE_PERMS = ["dashboard", "projects", "workers", "founders", "expenses", "settings"];
 
 let firestore;
+const memoryStore = global.__planetPrintMemoryStore || {
+  users: [],
+  finance: DEFAULT_FINANCE
+};
+global.__planetPrintMemoryStore = memoryStore;
 
 function withTimeout(promise, ms, message = "Request timeout") {
   let timer;
@@ -74,7 +80,7 @@ async function initDb() {
     }
   }
 
-  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  if (!serviceAccount && process.env.FIREBASE_SERVICE_ACCOUNT) {
     try {
       serviceAccount = normalizeServiceAccount(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT));
       console.log("✅ Firebase loaded from Environment Variables");
@@ -140,6 +146,63 @@ function fallbackAdminUser() {
   };
 }
 
+function publicUser(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    permissions: safeJsonParse(user.permissions, []),
+    createdAt: user.createdAt || Date.now()
+  };
+}
+
+function normalizeFinance(finance) {
+  const src = finance && typeof finance === "object" ? finance : {};
+  return {
+    projects: Array.isArray(src.projects) ? src.projects : [],
+    workers: Array.isArray(src.workers) ? src.workers : [],
+    founders: Array.isArray(src.founders) ? src.founders : [],
+    expenses: Array.isArray(src.expenses) ? src.expenses : [],
+    settings: {
+      tax: Number(src.settings?.tax) || 0,
+      reserve: Number(src.settings?.reserve) || 0,
+      other: Number(src.settings?.other) || 0
+    }
+  };
+}
+
+function canAccess(req, perm) {
+  if (req.user?.role === "super_admin") return true;
+  const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+  return permissions.includes(perm);
+}
+
+function visibleFinanceForUser(req, finance) {
+  const full = normalizeFinance(finance);
+  if (req.user?.role === "super_admin") return full;
+  return {
+    projects: canAccess(req, "projects") || canAccess(req, "dashboard") ? full.projects : [],
+    workers: canAccess(req, "workers") ? full.workers : [],
+    founders: canAccess(req, "founders") ? full.founders : [],
+    expenses: canAccess(req, "expenses") ? full.expenses : [],
+    settings: canAccess(req, "settings") ? full.settings : { tax: 0, reserve: 0, other: 0 }
+  };
+}
+
+function mergeFinanceForUser(req, currentFinance, incomingFinance) {
+  const current = normalizeFinance(currentFinance);
+  const incoming = normalizeFinance(incomingFinance);
+  if (req.user?.role === "super_admin") return incoming;
+
+  const next = { ...current };
+  if (canAccess(req, "projects")) next.projects = incoming.projects;
+  if (canAccess(req, "workers")) next.workers = incoming.workers;
+  if (canAccess(req, "founders")) next.founders = incoming.founders;
+  if (canAccess(req, "expenses")) next.expenses = incoming.expenses;
+  if (canAccess(req, "settings")) next.settings = incoming.settings;
+  return next;
+}
+
 function sendLogin(res, user) {
   const token = signToken(user);
   res.json({
@@ -151,6 +214,17 @@ function sendLogin(res, user) {
       permissions: safeJsonParse(user.permissions, [])
     }
   });
+}
+
+async function findMemoryUser(login, password) {
+  const normalized = String(login || "").toLowerCase();
+  const user = memoryStore.users.find((item) =>
+    String(item.username || "").toLowerCase() === normalized ||
+    String(item.email || "").toLowerCase() === normalized
+  );
+  if (!user || !user.passHash) return null;
+  const ok = await bcrypt.compare(password, user.passHash);
+  return ok ? user : null;
 }
 
 function authRequired(req, res, next) {
@@ -300,6 +374,8 @@ app.post("/api/auth/login", async (req, res) => {
     sendLogin(res, user);
   } catch (err) {
     console.error("Login failed:", err.message);
+    const memoryUser = await findMemoryUser(login, password);
+    if (memoryUser) return sendLogin(res, memoryUser);
     if (login === FALLBACK_ADMIN_USER && password === FALLBACK_ADMIN_PASS) {
       return sendLogin(res, fallbackAdminUser());
     }
@@ -346,29 +422,37 @@ app.post("/api/auth/google", async (req, res) => {
 });
 
 app.get("/api/auth/me", authRequired, async (req, res) => {
-  const userDoc = await firestore.collection("users").doc(req.user.id).get();
-  if (!userDoc.exists) return res.status(401).json({ error: "User not found" });
-  
-  const user = userDoc.data();
-  res.json({
-    user: {
-      id: userDoc.id,
-      username: user.username,
-      role: user.role,
-      permissions: safeJsonParse(user.permissions, [])
-    }
-  });
+  if (req.user.id === "fallback-super-admin") {
+    return res.json({ user: publicUser(fallbackAdminUser()) });
+  }
+
+  const memoryUser = memoryStore.users.find((user) => user.id === req.user.id);
+  if (memoryUser) return res.json({ user: publicUser(memoryUser) });
+
+  try {
+    const userDoc = await withTimeout(
+      firestore.collection("users").doc(req.user.id).get(),
+      10000,
+      "Firebase user lookup timeout"
+    );
+    if (!userDoc.exists) return res.status(401).json({ error: "User not found" });
+    
+    const user = { id: userDoc.id, ...userDoc.data() };
+    res.json({ user: publicUser(user) });
+  } catch (err) {
+    res.status(503).json({ error: `Firebase bilan aloqa yo'q: ${err.message}` });
+  }
 });
 
-app.get("/api/finance", authRequired, async (_req, res) => {
+app.get("/api/finance", authRequired, async (req, res) => {
   const financeDoc = await firestore.collection("settings").doc("finance").get();
   const financeData = financeDoc.exists ? financeDoc.data() : { data: DEFAULT_FINANCE };
   let finance = financeData.data ?? financeData;
   if (typeof finance === "string") finance = safeJsonParse(finance, DEFAULT_FINANCE);
-  if (!finance || typeof finance !== "object") finance = DEFAULT_FINANCE;
+  finance = normalizeFinance(finance);
 
   res.json({
-    finance,
+    finance: visibleFinanceForUser(req, finance),
     updatedAt: financeData.updatedAt ? financeData.updatedAt.toMillis() : Date.now()
   });
 });
@@ -376,27 +460,42 @@ app.get("/api/finance", authRequired, async (_req, res) => {
 app.put("/api/finance", authRequired, async (req, res) => {
   const finance = req.body?.finance;
   if (!finance || typeof finance !== "object") return res.status(400).json({ error: "Invalid payload" });
+  if (!FINANCE_PERMS.some((perm) => canAccess(req, perm))) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  const financeDoc = await firestore.collection("settings").doc("finance").get();
+  const financeData = financeDoc.exists ? financeDoc.data() : { data: DEFAULT_FINANCE };
+  let currentFinance = financeData.data ?? financeData;
+  if (typeof currentFinance === "string") currentFinance = safeJsonParse(currentFinance, DEFAULT_FINANCE);
+  const mergedFinance = mergeFinanceForUser(req, currentFinance, finance);
   
   await firestore.collection("settings").doc("finance").set({
-    data: finance,
+    data: mergedFinance,
     updatedAt: admin.firestore.FieldValue.serverTimestamp()
   });
   res.json({ ok: true });
 });
 
 app.get("/api/users", authRequired, superAdminRequired, async (_req, res) => {
-  const usersSnapshot = await firestore.collection("users").orderBy("createdAt", "asc").get();
-  const users = usersSnapshot.docs.map((doc) => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      username: data.username,
-      role: data.role,
-      permissions: safeJsonParse(data.permissions, []),
-      createdAt: data.createdAt ? data.createdAt.toMillis() : Date.now()
-    };
-  });
-  res.json({ users });
+  try {
+    const usersSnapshot = await withTimeout(
+      firestore.collection("users").orderBy("createdAt", "asc").get(),
+      10000,
+      "Firebase users timeout"
+    );
+    const users = usersSnapshot.docs.map((doc) => {
+      const data = doc.data();
+      return publicUser({
+        id: doc.id,
+        ...data,
+        createdAt: data.createdAt ? data.createdAt.toMillis() : Date.now()
+      });
+    });
+    res.json({ users });
+  } catch (err) {
+    console.error("Users fallback mode:", err.message);
+    res.json({ users: [publicUser(fallbackAdminUser()), ...memoryStore.users.map(publicUser)] });
+  }
 });
 
 app.post("/api/users", authRequired, superAdminRequired, async (req, res) => {
@@ -408,41 +507,94 @@ app.post("/api/users", authRequired, superAdminRequired, async (req, res) => {
   if (!username || password.length < 8) return res.status(400).json({ error: "Invalid credentials" });
   if (!["admin", "manager", "viewer"].includes(role)) return res.status(400).json({ error: "Invalid role" });
 
-  const existing = await firestore.collection("users").where("username", "==", username).limit(1).get();
-  if (!existing.empty) return res.status(409).json({ error: "Login already exists" });
-
   const passHash = await bcrypt.hash(password, 10);
   const id = Math.random().toString(36).slice(2, 10);
   const email = sanitizeText(req.body?.email, 128) || `${username}@planetprint.local`;
 
   try {
-    await admin.auth().createUser({ email, password });
+    const existing = await withTimeout(
+      firestore.collection("users").where("username", "==", username).limit(1).get(),
+      10000,
+      "Firebase existing user timeout"
+    );
+    if (!existing.empty) return res.status(409).json({ error: "Login already exists" });
+
+    try {
+      await admin.auth().createUser({ email, password });
+    } catch (err) {
+      console.warn('Warning creating firebase auth user:', err.message);
+    }
+
+    await withTimeout(
+      firestore.collection("users").doc(id).set({
+        username,
+        email,
+        passHash,
+        role,
+        permissions: JSON.stringify(permissions),
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      }),
+      10000,
+      "Firebase create user timeout"
+    );
+
+    return res.json({ ok: true, storage: "firebase" });
   } catch (err) {
-    console.warn('Warning creating firebase auth user:', err.message);
+    console.error("Create user fallback mode:", err.message);
   }
 
-  await firestore.collection("users").doc(id).set({
+  const normalized = username.toLowerCase();
+  const duplicate = memoryStore.users.some((user) => String(user.username || "").toLowerCase() === normalized);
+  if (duplicate) return res.status(409).json({ error: "Login already exists in fallback storage" });
+
+  memoryStore.users.push({
+    id,
     username,
     email,
     passHash,
     role,
     permissions: JSON.stringify(permissions),
-    createdAt: admin.firestore.FieldValue.serverTimestamp()
+    createdAt: Date.now()
   });
 
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    storage: "memory",
+    warning: "Firebase ishlamagani uchun foydalanuvchi vaqtinchalik server xotirasida saqlandi. Vercel redeploy/cold startdan keyin yo'qolishi mumkin."
+  });
 });
 
 app.delete("/api/users/:id", authRequired, superAdminRequired, async (req, res) => {
   const id = sanitizeText(req.params.id, 40);
-  const userDoc = await firestore.collection("users").doc(id).get();
-  if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
-  
-  const user = userDoc.data();
-  if (user.role === "super_admin") return res.status(400).json({ error: "Super adminni o'chirib bo'lmaydi" });
-  
-  await firestore.collection("users").doc(id).delete();
-  res.json({ ok: true });
+  const memoryIndex = memoryStore.users.findIndex((user) => user.id === id);
+  if (memoryIndex >= 0) {
+    if (memoryStore.users[memoryIndex].role === "super_admin") {
+      return res.status(400).json({ error: "Super adminni o'chirib bo'lmaydi" });
+    }
+    memoryStore.users.splice(memoryIndex, 1);
+    return res.json({ ok: true, storage: "memory" });
+  }
+
+  try {
+    const userDoc = await withTimeout(
+      firestore.collection("users").doc(id).get(),
+      10000,
+      "Firebase user delete lookup timeout"
+    );
+    if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
+    
+    const user = userDoc.data();
+    if (user.role === "super_admin") return res.status(400).json({ error: "Super adminni o'chirib bo'lmaydi" });
+    
+    await withTimeout(
+      firestore.collection("users").doc(id).delete(),
+      10000,
+      "Firebase user delete timeout"
+    );
+    res.json({ ok: true, storage: "firebase" });
+  } catch (err) {
+    res.status(503).json({ error: `Firebase bilan aloqa yo'q: ${err.message}` });
+  }
 });
 
 // SPA uchun barcha boshqa yo'llarni HTML-ga yo'naltirish
