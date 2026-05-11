@@ -172,12 +172,22 @@
     .panel { padding: 20px; margin-bottom: 16px; }
     .section-title { margin: 0 0 8px; font-size: 26px; }
     .section-help { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
-    .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; overflow-x: auto; padding-bottom: 2px; }
-    .kpi { padding: 20px; min-height: 114px; }
-    .kpi h3 { margin: 0; font-size: 14px; color: var(--muted); font-weight: 600; text-transform: none; }
-    .kpi .v { margin-top: 6px; font-size: 27px; font-weight: 850; color: var(--brand); }
+    .kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(230px, 1fr)); gap: 14px; margin-bottom: 24px; }
+    .kpi { padding: 18px; min-height: 126px; display: grid; align-content: space-between; gap: 10px; position: relative; overflow: hidden; }
+    .kpi::after { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--brand); }
+    .kpi h3 { margin: 0; font-size: 13px; color: var(--muted); font-weight: 700; text-transform: none; }
+    .kpi .v { margin-top: 6px; font-size: 25px; line-height: 1.15; font-weight: 850; color: var(--text); overflow-wrap: anywhere; }
+    .kpi .meta { color: var(--muted); font-size: 12px; line-height: 1.35; }
+    .kpi.income::after { background: #0868c9; }
+    .kpi.cash::after { background: #11a37f; }
+    .kpi.warn-kpi::after { background: #f59e0b; }
+    .kpi.danger-kpi::after { background: #dc2626; }
+    .kpi.neutral-kpi::after { background: #64748b; }
+    .kpi.profit-kpi::after { background: #7c3aed; }
     .split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     ul.tight { margin: 0; padding-left: 18px; line-height: 1.55; font-size: 14px; }
+    .check-list { padding-left: 0; list-style: none; display: grid; gap: 8px; }
+    .check-list li { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel-soft); }
     .table-wrap { margin-top: 14px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
     table { width: 100%; border-collapse: collapse; min-width: 980px; background: var(--panel); }
     th, td { border-bottom: 1px solid var(--line); padding: 12px 10px; text-align: left; font-size: 13px; vertical-align: middle; }
@@ -211,7 +221,7 @@
     @media (max-width: 1100px) {
       #appSection { grid-template-columns: 1fr; }
       .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
-      .kpi-grid { grid-template-columns: repeat(2, minmax(170px, 1fr)); }
+      .kpi-grid { grid-template-columns: repeat(2, minmax(190px, 1fr)); }
       .charts, .charts.dashboard-charts { grid-template-columns: 1fr; }
       .split { grid-template-columns: 1fr; }
     }
@@ -219,6 +229,24 @@
       .content, .topbar { padding-left: 14px; padding-right: 14px; }
       .grid-2, .grid-3, .grid-4, .perm-grid { grid-template-columns: 1fr; }
       .kpi-grid { grid-template-columns: 1fr; }
+      .content { padding-top: 16px; }
+      .topbar { align-items: flex-start; }
+      .top-left { gap: 10px; }
+      .top-left h1 { font-size: 19px; }
+      .top-actions { width: 100%; }
+      .top-actions > * { flex: 1 1 auto; text-align: center; }
+      .sidebar { padding: 12px; }
+      .brand-row { margin-bottom: 12px; }
+      .nav-label { margin-top: 12px; }
+      .tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .tab { text-align: center; padding: 11px 8px; }
+      .panel { padding: 14px; }
+      .section-title { font-size: 22px; }
+      .kpi { min-height: 112px; padding: 16px; }
+      .kpi .v { font-size: 22px; }
+      table { min-width: 760px; }
+      .expense-table { min-width: 720px; }
+      canvas { height: 210px; }
     }
   </style>
 </head>
@@ -423,7 +451,7 @@
       <section id="expenses" class="page">
         <div class="panel card">
           <h2 class="section-title">Xarajatlar</h2>
-          <p class="section-help">Turlar: banner, arakal, rezka, reyka, dostavka, boshqa, oylik avans, ta'sischi avans.</p>
+          <p class="section-help">Turlar: banner, arakal, rezka, reyka, dostavka, boshqa, oylik avans, ta'sischi avans. To'lov turi alohida ko'rsatiladi.</p>
           <form id="expenseForm">
             <div class="grid-4">
               <div><label for="eDate">Sana</label><input id="eDate" type="date" required /></div>
@@ -441,6 +469,14 @@
                 </select>
               </div>
               <div><label for="eAmount">Summa (UZS)</label><input id="eAmount" inputmode="decimal" required /></div>
+              <div>
+                <label for="ePaymentType">To'lov turi</label>
+                <select id="ePaymentType" required>
+                  <option value="naqd">Naqd</option>
+                  <option value="klik">Klik</option>
+                  <option value="shot">Shot (kartadan yechilgan)</option>
+                </select>
+              </div>
               <div><label for="eNote">Izoh</label><input id="eNote" /></div>
               <div id="eWorkerWrap" class="hidden">
                 <label for="eWorkerId">Ishchi</label>
@@ -459,8 +495,8 @@
             <div id="expenseMsg" class="msg"></div>
           </form>
           <div class="table-wrap">
-            <table>
-              <thead><tr><th>Sana</th><th>Turi</th><th>Summa</th><th>Ishchi/Ta'sischi</th><th>Izoh</th><th>Amal</th></tr></thead>
+            <table class="expense-table">
+              <thead><tr><th>Sana</th><th>Turi</th><th>Summa</th><th>To'lov</th><th>Ishchi/Ta'sischi</th><th>Izoh</th><th>Amal</th></tr></thead>
               <tbody id="expensesBody"></tbody>
             </table>
           </div>
@@ -530,6 +566,11 @@
       founder_avans: "Ta'sischi avansi"
     };
     const REAL_EXPENSE_TYPES = ["banner", "arakal", "rezka", "reyka", "dostavka", "boshqa", "oylik_avans"];
+    const EXPENSE_PAYMENT_LABEL = {
+      naqd: "Naqd",
+      klik: "Klik",
+      shot: "Shot (kartadan yechilgan)"
+    };
 
     const ALL_PERMS = ["dashboard", "projects", "workers", "founders", "expenses", "settings"];
     const PAGE_TITLES = {
@@ -611,7 +652,8 @@
       founderCalcList: document.getElementById("founderCalcList"),
 
       expenseForm: document.getElementById("expenseForm"),
-      eDate: document.getElementById("eDate"), eType: document.getElementById("eType"), eAmount: document.getElementById("eAmount"), eNote: document.getElementById("eNote"),
+      eDate: document.getElementById("eDate"), eType: document.getElementById("eType"), eAmount: document.getElementById("eAmount"),
+      ePaymentType: document.getElementById("ePaymentType"), eNote: document.getElementById("eNote"),
       eWorkerWrap: document.getElementById("eWorkerWrap"), eWorkerId: document.getElementById("eWorkerId"),
       eFounderWrap: document.getElementById("eFounderWrap"), eFounderId: document.getElementById("eFounderId"),
       expenseSubmitBtn: document.getElementById("expenseSubmitBtn"),
@@ -804,6 +846,10 @@
       const manualOther = Math.max(num(state.finance.settings.other), 0);
       const expenseByType = {};
       state.finance.expenses.forEach((e) => { expenseByType[e.type] = (expenseByType[e.type] || 0) + num(e.amount); });
+      const expensePaymentByType = {};
+      state.finance.expenses.forEach((e) => {
+        if (EXPENSE_PAYMENT_LABEL[e.paymentType]) expensePaymentByType[e.paymentType] = (expensePaymentByType[e.paymentType] || 0) + num(e.amount);
+      });
       const explicitExpense = REAL_EXPENSE_TYPES.reduce((a, t) => a + (expenseByType[t] || 0), 0);
       const totalRealExpenses = manualOther + tax + reserve + explicitExpense;
 
@@ -818,11 +864,14 @@
         return { ...f, base, founderAdvance, final };
       });
       const founderAdvanceTotal = Object.values(founderAvMap).reduce((a, v) => a + v, 0);
+      const overdueProjects = state.finance.projects.filter(p => liveStatus(p) === "Muddatidan o'tgan").length;
+      const completedProjects = state.finance.projects.filter(p => liveStatus(p) === "Yakunlangan").length;
 
       return {
         totalAmount, totalAdvance, receivable, salaryFundBase, workerAdvanceTotal, salaryPayableNow,
-        tax, reserve, manualOther, expenseByType, explicitExpense, totalRealExpenses,
-        founderPoolRaw, founderPool, founderShareTotal, founderRows, founderAdvanceTotal
+        tax, reserve, manualOther, expenseByType, expensePaymentByType, explicitExpense, totalRealExpenses,
+        founderPoolRaw, founderPool, founderShareTotal, founderRows, founderAdvanceTotal,
+        overdueProjects, completedProjects
       };
     }
 
@@ -842,14 +891,14 @@
     function renderSummary() {
       const s = summary();
       const items = [
-        { t: "Jami loyiha summasi", v: fmt(s.totalAmount) },
-        { t: "Mijoz avansi", v: fmt(s.totalAdvance) },
-        { t: "Qolgan to'lov", v: fmt(s.receivable) },
-        { t: "Ishchi avansi", v: fmt(s.workerAdvanceTotal) },
-        { t: "Xarajatlar jami", v: fmt(s.totalRealExpenses) },
-        { t: "Ta'sischi fondi", v: fmt(s.founderPool) }
+        { t: "Jami loyiha summasi", v: fmt(s.totalAmount), meta: `${state.finance.projects.length} ta loyiha`, cls: "income" },
+        { t: "Mijoz avansi", v: fmt(s.totalAdvance), meta: `Qolgan to'lov: ${fmt(s.receivable)}`, cls: "cash" },
+        { t: "Xarajatlar jami", v: fmt(s.totalRealExpenses), meta: `Xarajat bo'limi: ${fmt(s.explicitExpense)}`, cls: "warn-kpi" },
+        { t: "Ishchi avansi", v: fmt(s.workerAdvanceTotal), meta: `Qolgan oylik: ${fmt(s.salaryPayableNow)}`, cls: "neutral-kpi" },
+        { t: "Muddat nazorati", v: `${s.overdueProjects} ta`, meta: `Yakunlangan: ${s.completedProjects} ta`, cls: s.overdueProjects ? "danger-kpi" : "cash" },
+        { t: "Ta'sischi fondi", v: fmt(s.founderPool), meta: `Foizlar jami: ${s.founderShareTotal.toFixed(2)}%`, cls: "profit-kpi" }
       ];
-      el.kpiGrid.innerHTML = items.map(x => `<div class="kpi card"><h3>${x.t}</h3><div class="v">${x.v}</div></div>`).join("");
+      el.kpiGrid.innerHTML = items.map(x => `<div class="kpi card ${x.cls}"><div><h3>${x.t}</h3><div class="v">${x.v}</div></div><div class="meta">${x.meta}</div></div>`).join("");
       el.formulaList.innerHTML = [
         `Loyiha summasi = ${fmt(s.totalAmount)}`,
         `Xarajatlar = Qo'lda (${fmt(s.manualOther)}) + Soliq (${fmt(s.tax)}) + Zaxira (${fmt(s.reserve)}) + Xarajat bo'limi (${fmt(s.explicitExpense)})`,
@@ -857,10 +906,11 @@
         `Ta'sischi avansi xarajat emas, ta'sischining ulushidan ayriladi: ${fmt(s.founderAdvanceTotal)}`,
         `Ta'sischilar fondi = ${fmt(s.totalAmount)} - ${fmt(s.totalRealExpenses)} = ${fmt(s.founderPoolRaw)} (manfiy bo'lsa 0)`
       ].map(x => `<li>${x}</li>`).join("");
-      const over = state.finance.projects.filter(p => liveStatus(p) === "Muddatidan o'tgan").length;
+      el.checkList.classList.add("check-list");
       el.checkList.innerHTML = [
         `<li>Loyihalar soni: ${state.finance.projects.length}</li>`,
-        `<li>Muddatidan o'tgan: ${over}</li>`,
+        `<li>Muddatidan o'tgan: ${s.overdueProjects}</li>`,
+        `<li>Xarajat to'lovlari: Naqd ${fmt(s.expensePaymentByType.naqd || 0)}, Klik ${fmt(s.expensePaymentByType.klik || 0)}, Shot ${fmt(s.expensePaymentByType.shot || 0)}</li>`,
         `<li>Ta'sischilar foizi jami: ${s.founderShareTotal.toFixed(2)}%</li>`,
         `<li>Qolgan oylik jami: ${fmt(s.salaryPayableNow)}</li>`
       ].join("");
@@ -971,13 +1021,14 @@
     }
 
     function renderExpenses() {
-      if (!state.finance.expenses.length) { el.expensesBody.innerHTML = `<tr><td colspan="6">Hozircha xarajat yo'q.</td></tr>`; return; }
+      if (!state.finance.expenses.length) { el.expensesBody.innerHTML = `<tr><td colspan="7">Hozircha xarajat yo'q.</td></tr>`; return; }
       el.expensesBody.innerHTML = state.finance.expenses.map((e) => {
         const worker = e.workerId ? state.finance.workers.find(w => w.id === e.workerId)?.name : "";
         const founder = e.founderId ? state.finance.founders.find(f => f.id === e.founderId)?.name : "";
         const target = worker || founder || "-";
+        const paymentType = EXPENSE_PAYMENT_LABEL[e.paymentType] || (e.paymentType ? clean(e.paymentType) : "Ko'rsatilmagan");
         return `<tr>
-          <td>${clean(e.date)}</td><td>${EXPENSE_LABEL[e.type] || clean(e.type)}</td><td>${fmt(e.amount)}</td><td>${clean(target)}</td><td>${clean(e.note || "-")}</td>
+          <td>${clean(e.date)}</td><td>${EXPENSE_LABEL[e.type] || clean(e.type)}</td><td>${fmt(e.amount)}</td><td>${paymentType}</td><td>${clean(target)}</td><td>${clean(e.note || "-")}</td>
           <td>
             <button class="ghost small-btn" type="button" data-edit-e="${e.id}">Tahrirlash</button>
             <button class="danger small-btn" type="button" data-del-e="${e.id}">O'chirish</button>
@@ -991,7 +1042,7 @@
       Array.from(el.expensesBody.querySelectorAll("[data-edit-e]")).forEach((b) => b.addEventListener("click", () => {
         const e = state.finance.expenses.find(x => x.id === b.getAttribute("data-edit-e")); if (!e) return;
         editState.expenseId = e.id;
-        el.eDate.value = e.date; el.eType.value = e.type; el.eAmount.value = e.amount; el.eNote.value = e.note || "";
+        el.eDate.value = e.date; el.eType.value = e.type; el.eAmount.value = e.amount; el.ePaymentType.value = e.paymentType || "naqd"; el.eNote.value = e.note || "";
         fillExpenseRelatedSelects(); toggleExpenseTypeInputs();
         if (e.workerId) el.eWorkerId.value = e.workerId;
         if (e.founderId) el.eFounderId.value = e.founderId;
@@ -1268,11 +1319,13 @@
           date: el.eDate.value || today(),
           type: clean(el.eType.value),
           amount: num(el.eAmount.value),
+          paymentType: clean(el.ePaymentType.value),
           note: clean(el.eNote.value),
           workerId: null,
           founderId: null
         };
         if (!rec.date || rec.amount <= 0) return msg(el.expenseMsg, "Sana va summa to'g'ri bo'lsin.", "err");
+        if (!EXPENSE_PAYMENT_LABEL[rec.paymentType]) return msg(el.expenseMsg, "To'lov turini tanlang.", "err");
         if (rec.type === "oylik_avans") {
           rec.workerId = el.eWorkerId.value;
           if (!rec.workerId) return msg(el.expenseMsg, "Ishchini tanlang.", "err");
