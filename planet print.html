@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Planet Print - Secure Finance Panel</title>
-  <link rel="icon" type="image/jpeg" href="/assets/planet-print-logo.jpg" />
+  <link rel="icon" type="image/jpeg" href="assets/planet-print-logo.jpg" />
   <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
@@ -114,6 +114,12 @@
     .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
     .msg { margin-top: 8px; font-size: 13px; font-weight: 700; }
     .ok { color: var(--ok); } .err { color: var(--danger); } .warn { color: var(--warn); }
+    .alert-stack { display: grid; gap: 8px; margin-bottom: 14px; }
+    .alert-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; background: var(--panel); font-size: 13px; line-height: 1.45; }
+    .alert-card.today { border-color: #fbbf24; background: #fffbeb; color: #78350f; }
+    .alert-card.overdue { border-color: #fecaca; background: #fef2f2; color: #7f1d1d; }
+    body.dark .alert-card.today { background: #2f250d; color: #fde68a; border-color: #92400e; }
+    body.dark .alert-card.overdue { background: #341313; color: #fecaca; border-color: #7f1d1d; }
     #appSection { min-height: 100vh; display: grid; grid-template-columns: var(--sidebar) 1fr; }
     .sidebar {
       background: var(--surface);
@@ -197,6 +203,7 @@
     .s-progress { background: #fff6e8; color: #8a5300; }
     .s-done { background: #eaf8f0; color: #196b47; }
     .s-over { background: #fff1f0; color: #9f2d23; }
+    .s-due { background: #fffbeb; color: #92400e; }
     .charts { display: grid; grid-template-columns: repeat(3, minmax(260px, 1fr)); gap: 16px; margin-top: 16px; }
     .charts.dashboard-charts { grid-template-columns: repeat(2, minmax(300px, 1fr)); }
     .chart-box { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 16px; }
@@ -255,7 +262,7 @@
     <section id="authSection" class="auth-wrap">
       <div class="auth-stack">
         <div class="brand-head">
-          <div class="logo-mark" aria-label="Planet Print logo"><img src="/assets/planet-print-logo.jpg" alt="Planet Print logo" /></div>
+          <div class="logo-mark" aria-label="Planet Print logo"><img src="assets/planet-print-logo.jpg" alt="Planet Print logo" onerror="this.style.display='none'; this.parentElement.textContent='P';" /></div>
           <div>
             <h1 class="brand">Planet Print</h1>
             <p class="sub">Boshqaruv paneli</p>
@@ -295,7 +302,7 @@
     <section id="appSection" class="hidden">
       <aside class="sidebar">
         <div class="brand-row">
-          <div class="logo-mark small" aria-label="Planet Print logo"><img src="/assets/planet-print-logo.jpg" alt="Planet Print logo" /></div>
+          <div class="logo-mark small" aria-label="Planet Print logo"><img src="assets/planet-print-logo.jpg" alt="Planet Print logo" onerror="this.style.display='none'; this.parentElement.textContent='P';" /></div>
           <div>
             <h1>Planet Print</h1>
             <p>Boshqaruv tizimi</p>
@@ -328,7 +335,8 @@
           <p class="section-help">Planet Print uchun loyihalar, xarajatlar va huquqlar nazorati.</p>
         </div>
         <div class="kpi-grid" id="kpiGrid"></div>
-        <div class="panel card">
+        <div id="projectAlerts" class="alert-stack"></div>
+        <div id="calcCenter" class="panel card super-only">
           <h2 class="section-title">Hisob-kitob Markazi</h2>
           <p class="section-help">Xarajatlar bo'limi va avanslar hisobga olinadi. Ishchi avansi oylikdan, ta'sischi avansi ulushdan ayriladi.</p>
           <div class="split">
@@ -358,12 +366,14 @@
       </section>
 
       <section id="projects" class="page">
+        <div id="projectPageAlerts" class="alert-stack"></div>
         <div class="panel card">
           <h2 class="section-title">Loyihalar va To'lovlar</h2>
           <form id="projectForm">
             <div class="grid-4">
               <div><label for="pName">Loyiha nomi</label><input id="pName" required maxlength="70" /></div>
               <div><label for="pClient">Mijoz</label><input id="pClient" required maxlength="70" /></div>
+              <div><label for="pClientLogin">Zakazchi login</label><input id="pClientLogin" maxlength="32" placeholder="Masalan: ali" /></div>
               <div><label for="pStart">Olingan muddat</label><input id="pStart" type="date" required /></div>
               <div><label for="pDue">Topshirish muddati</label><input id="pDue" type="date" required /></div>
               <div><label for="pAmount">Loyiha summasi (UZS)</label><input id="pAmount" inputmode="decimal" required /></div>
@@ -380,7 +390,7 @@
           </form>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Nomi</th><th>Mijoz</th><th>Olingan</th><th>Topshirish</th><th>Summa</th><th>Advance</th><th>Qolgan</th><th>To'lov</th><th>Holat</th><th>Amal</th></tr></thead>
+              <thead id="projectsHead"><tr><th>Nomi</th><th>Mijoz</th><th>Zakazchi login</th><th>Olingan</th><th>Topshirish</th><th>Summa</th><th>Advance</th><th>Qolgan</th><th>To'lov</th><th>Holat</th><th>Amal</th></tr></thead>
               <tbody id="projectsBody"></tbody>
             </table>
           </div>
@@ -511,7 +521,7 @@
               <div><label for="uName">Login</label><input id="uName" maxlength="32" required /></div>
               <div><label for="uEmail">Email</label><input id="uEmail" type="email" maxlength="128" required /></div>
               <div><label for="uPass">Parol</label><input id="uPass" type="password" maxlength="64" required /></div>
-              <div><label for="uRole">Roli</label><select id="uRole"><option value="admin">Admin</option><option value="manager">Manager</option><option value="viewer">Viewer</option></select></div>
+              <div><label for="uRole">Roli</label><select id="uRole"><option value="admin">Admin</option><option value="manager">Manager</option><option value="viewer">Viewer</option><option value="client">Zakazchi</option></select></div>
             </div>
             <label class="checkline"><input id="uShowPass" type="checkbox" /> Parolni ko'rsatish</label>
             <div>
@@ -582,6 +592,7 @@
       users: "Foydalanuvchilar",
       settings: "Sozlamalar"
     };
+    const CLIENT_PAGE_TITLES = { projects: "Zakazlarim" };
 
     const editState = { projectId: null, workerId: null, founderId: null, expenseId: null };
 
@@ -617,6 +628,9 @@
       tabs: document.getElementById("tabs"),
       pages: Array.from(document.querySelectorAll(".page")),
       kpiGrid: document.getElementById("kpiGrid"),
+      calcCenter: document.getElementById("calcCenter"),
+      projectAlerts: document.getElementById("projectAlerts"),
+      projectPageAlerts: document.getElementById("projectPageAlerts"),
       formulaList: document.getElementById("formulaList"),
       checkList: document.getElementById("checkList"),
       paymentChart: document.getElementById("paymentChart"),
@@ -628,12 +642,14 @@
 
       projectForm: document.getElementById("projectForm"),
       pName: document.getElementById("pName"), pClient: document.getElementById("pClient"),
+      pClientLogin: document.getElementById("pClientLogin"),
       pStart: document.getElementById("pStart"), pDue: document.getElementById("pDue"),
       pAmount: document.getElementById("pAmount"), pAdvance: document.getElementById("pAdvance"),
       pType: document.getElementById("pType"), pStatus: document.getElementById("pStatus"),
       projectSubmitBtn: document.getElementById("projectSubmitBtn"),
       projectCancelEdit: document.getElementById("projectCancelEdit"),
       projectReset: document.getElementById("projectReset"), projectMsg: document.getElementById("projectMsg"),
+      projectsHead: document.getElementById("projectsHead"),
       projectsBody: document.getElementById("projectsBody"),
 
       workerForm: document.getElementById("workerForm"),
@@ -745,6 +761,7 @@
     function defaultPermsByRole(role) {
       if (role === "admin") return ["dashboard", "projects", "workers", "founders", "expenses", "settings"];
       if (role === "manager") return ["dashboard", "projects", "workers", "founders", "expenses"];
+      if (role === "client") return ["projects"];
       return ["dashboard"];
     }
     function hasPerm(page) {
@@ -754,6 +771,15 @@
     }
     function isSuperAdmin() {
       return state.currentUser?.role === "super_admin";
+    }
+    function isClientUser() {
+      return state.currentUser?.role === "client";
+    }
+    function canEditProjects() {
+      return hasPerm("projects") && !isClientUser() && state.currentUser?.role !== "viewer";
+    }
+    function pageTitle(page) {
+      return isClientUser() && CLIENT_PAGE_TITLES[page] ? CLIENT_PAGE_TITLES[page] : (PAGE_TITLES[page] || "Planet Print");
     }
 
     function setTheme(name) {
@@ -771,10 +797,10 @@
       const base = ["dashboard", "projects", "workers", "founders", "expenses", "settings"];
       const visible = base.filter(hasPerm);
       if (state.currentUser.role === "super_admin") visible.splice(visible.length - 1, 0, "users");
-      el.tabs.innerHTML = visible.map((p, i) => `<button class="tab ${i === 0 ? "active" : ""}" data-page="${p}">${PAGE_TITLES[p]}</button>`).join("");
+      el.tabs.innerHTML = visible.map((p, i) => `<button class="tab ${i === 0 ? "active" : ""}" data-page="${p}">${pageTitle(p)}</button>`).join("");
       el.pages.forEach((x) => x.classList.remove("active"));
       if (visible[0]) document.getElementById(visible[0]).classList.add("active");
-      if (el.pageHeading) el.pageHeading.textContent = PAGE_TITLES[visible[0]] || "Dashboard";
+      if (el.pageHeading) el.pageHeading.textContent = pageTitle(visible[0]) || "Dashboard";
       Array.from(el.tabs.querySelectorAll(".tab")).forEach((btn) => {
         btn.addEventListener("click", () => {
           const page = btn.getAttribute("data-page");
@@ -782,7 +808,7 @@
           btn.classList.add("active");
           el.pages.forEach((x) => x.classList.remove("active"));
           document.getElementById(page).classList.add("active");
-          if (el.pageHeading) el.pageHeading.textContent = PAGE_TITLES[page] || "Planet Print";
+          if (el.pageHeading) el.pageHeading.textContent = pageTitle(page);
           drawCharts();
         });
       });
@@ -800,18 +826,19 @@
       el.appSection.classList.toggle("is-limited", !isSuperAdmin());
       el.userBadge.textContent = `User: ${state.currentUser.username} (${state.currentUser.role})`;
       el.timeBadge.textContent = new Date().toLocaleString("uz-UZ");
-      el.welcomeLine.textContent = "Xush kelibsiz. Bu panel login orqali himoyalangan.";
+      el.welcomeLine.textContent = isClientUser() ? "Zakazlaringiz holati va topshirish muddati." : "Xush kelibsiz. Bu panel login orqali himoyalangan.";
       if (el.expenseReset) el.expenseReset.classList.toggle("hidden", !isSuperAdmin());
       if (el.clearData) el.clearData.classList.toggle("hidden", !isSuperAdmin());
       renderTabs();
       el.pages.forEach((x) => x.classList.remove("active"));
-      document.getElementById("dashboard").classList.add("active");
-      const firstTab = el.tabs.querySelector('[data-page="dashboard"]');
+      const firstPage = el.tabs.querySelector(".tab")?.getAttribute("data-page") || "dashboard";
+      document.getElementById(firstPage).classList.add("active");
+      const firstTab = el.tabs.querySelector(`[data-page="${firstPage}"]`);
       if (firstTab) {
         Array.from(el.tabs.querySelectorAll(".tab")).forEach((b) => b.classList.remove("active"));
         firstTab.classList.add("active");
       }
-      if (el.pageHeading) el.pageHeading.textContent = "Dashboard";
+      if (el.pageHeading) el.pageHeading.textContent = pageTitle(firstPage);
     }
 
     function workerAdvanceById() {
@@ -864,27 +891,30 @@
         return { ...f, base, founderAdvance, final };
       });
       const founderAdvanceTotal = Object.values(founderAvMap).reduce((a, v) => a + v, 0);
-      const overdueProjects = state.finance.projects.filter(p => liveStatus(p) === "Muddatidan o'tgan").length;
+      const overdueProjects = state.finance.projects.filter(p => liveStatus(p) === "Kechiktirilgan zakaz").length;
+      const dueTodayProjects = state.finance.projects.filter(p => liveStatus(p) === "Topshirish vaqti").length;
       const completedProjects = state.finance.projects.filter(p => liveStatus(p) === "Yakunlangan").length;
 
       return {
         totalAmount, totalAdvance, receivable, salaryFundBase, workerAdvanceTotal, salaryPayableNow,
         tax, reserve, manualOther, expenseByType, expensePaymentByType, explicitExpense, totalRealExpenses,
         founderPoolRaw, founderPool, founderShareTotal, founderRows, founderAdvanceTotal,
-        overdueProjects, completedProjects
+        overdueProjects, dueTodayProjects, completedProjects
       };
     }
 
     function liveStatus(p) {
       if (p.status === "Yakunlangan") return "Yakunlangan";
-      if (p.dueDate < today()) return "Muddatidan o'tgan";
-      if (p.status === "Jarayonda") return "Jarayonda";
+      if (p.dueDate < today()) return "Kechiktirilgan zakaz";
+      if (p.dueDate === today()) return "Topshirish vaqti";
+      if (p.startDate <= today()) return "Jarayonda";
       return "Yangi";
     }
     function statusCls(s) {
       if (s === "Yakunlangan") return "pill s-done";
       if (s === "Jarayonda") return "pill s-progress";
-      if (s === "Muddatidan o'tgan") return "pill s-over";
+      if (s === "Topshirish vaqti") return "pill s-due";
+      if (s === "Kechiktirilgan zakaz") return "pill s-over";
       return "pill s-new";
     }
 
@@ -895,8 +925,8 @@
         { t: "Mijoz avansi", v: fmt(s.totalAdvance), meta: `Qolgan to'lov: ${fmt(s.receivable)}`, cls: "cash" },
         { t: "Xarajatlar jami", v: fmt(s.totalRealExpenses), meta: `Xarajat bo'limi: ${fmt(s.explicitExpense)}`, cls: "warn-kpi" },
         { t: "Ishchi avansi", v: fmt(s.workerAdvanceTotal), meta: `Qolgan oylik: ${fmt(s.salaryPayableNow)}`, cls: "neutral-kpi" },
-        { t: "Muddat nazorati", v: `${s.overdueProjects} ta`, meta: `Yakunlangan: ${s.completedProjects} ta`, cls: s.overdueProjects ? "danger-kpi" : "cash" },
-        { t: "Ta'sischi fondi", v: fmt(s.founderPool), meta: `Foizlar jami: ${s.founderShareTotal.toFixed(2)}%`, cls: "profit-kpi" }
+        { t: "Muddat nazorati", v: `${s.overdueProjects} ta`, meta: `Bugun topshirish: ${s.dueTodayProjects} ta, yakunlangan: ${s.completedProjects} ta`, cls: s.overdueProjects ? "danger-kpi" : "cash" },
+        { t: "Ta'sischi fondi", v: fmt(s.founderPool), meta: `Soliq ${fmt(s.tax)}, zaxira ${fmt(s.reserve)}, qo'lda ${fmt(s.manualOther)}`, cls: "profit-kpi" }
       ];
       el.kpiGrid.innerHTML = items.map(x => `<div class="kpi card ${x.cls}"><div><h3>${x.t}</h3><div class="v">${x.v}</div></div><div class="meta">${x.meta}</div></div>`).join("");
       el.formulaList.innerHTML = [
@@ -909,12 +939,29 @@
       el.checkList.classList.add("check-list");
       el.checkList.innerHTML = [
         `<li>Loyihalar soni: ${state.finance.projects.length}</li>`,
-        `<li>Muddatidan o'tgan: ${s.overdueProjects}</li>`,
+        `<li>Bugun topshirish vaqti kelgan: ${s.dueTodayProjects}</li>`,
+        `<li>Kechiktirilgan zakaz: ${s.overdueProjects}</li>`,
         `<li>Xarajat to'lovlari: Naqd ${fmt(s.expensePaymentByType.naqd || 0)}, Klik ${fmt(s.expensePaymentByType.klik || 0)}, Shot ${fmt(s.expensePaymentByType.shot || 0)}</li>`,
         `<li>Ta'sischilar foizi jami: ${s.founderShareTotal.toFixed(2)}%</li>`,
         `<li>Qolgan oylik jami: ${fmt(s.salaryPayableNow)}</li>`
       ].join("");
       if (s.founderShareTotal > 100) el.checkList.innerHTML += `<li style="color:#b42318;">Diqqat: foiz 100% dan oshgan.</li>`;
+    }
+
+    function renderProjectAlerts() {
+      const alerts = state.finance.projects
+        .map((p) => ({ project: p, status: liveStatus(p) }))
+        .filter((item) => item.status === "Topshirish vaqti" || item.status === "Kechiktirilgan zakaz")
+        .map((item) => {
+          const cls = item.status === "Topshirish vaqti" ? "today" : "overdue";
+          const text = item.status === "Topshirish vaqti"
+            ? `${clean(item.project.name)} zakazini bugun topshirish vaqti.`
+            : `${clean(item.project.name)} kechiktirilgan zakaz sifatida turibdi.`;
+          return `<div class="alert-card ${cls}"><strong>${item.status}</strong><br>${text}</div>`;
+        })
+        .join("");
+      if (el.projectAlerts) el.projectAlerts.innerHTML = isSuperAdmin() ? alerts : "";
+      if (el.projectPageAlerts) el.projectPageAlerts.innerHTML = alerts;
     }
 
     function setFormEditMode(form, submitBtn, cancelBtn, on) {
@@ -923,12 +970,28 @@
     }
 
     function renderProjects() {
-      if (!state.finance.projects.length) { el.projectsBody.innerHTML = `<tr><td colspan="10">Hozircha loyiha yo'q.</td></tr>`; return; }
+      const clientView = isClientUser();
+      el.projectForm.classList.toggle("hidden", !canEditProjects());
+      if (clientView) {
+        el.projectsHead.innerHTML = `<tr><th>Nomi</th><th>Mijoz</th><th>Olingan</th><th>Topshirish</th><th>Holat</th></tr>`;
+      } else {
+        el.projectsHead.innerHTML = `<tr><th>Nomi</th><th>Mijoz</th><th>Zakazchi login</th><th>Olingan</th><th>Topshirish</th><th>Summa</th><th>Advance</th><th>Qolgan</th><th>To'lov</th><th>Holat</th><th>Amal</th></tr>`;
+      }
+      if (!state.finance.projects.length) {
+        el.projectsBody.innerHTML = `<tr><td colspan="${clientView ? 5 : 11}">${clientView ? "Sizga biriktirilgan zakaz yo'q." : "Hozircha loyiha yo'q."}</td></tr>`;
+        return;
+      }
       el.projectsBody.innerHTML = state.finance.projects.map((p) => {
         const remain = Math.max(num(p.amount) - num(p.advance), 0);
         const s = liveStatus(p);
+        if (clientView) {
+          return `<tr>
+            <td>${clean(p.name)}</td><td>${clean(p.client || state.currentUser.username)}</td><td>${clean(p.startDate)}</td><td>${clean(p.dueDate)}</td>
+            <td><span class="${statusCls(s)}">${s}</span></td>
+          </tr>`;
+        }
         return `<tr>
-          <td>${clean(p.name)}</td><td>${clean(p.client)}</td><td>${clean(p.startDate)}</td><td>${clean(p.dueDate)}</td>
+          <td>${clean(p.name)}</td><td>${clean(p.client)}</td><td>${clean(p.clientLogin || "-")}</td><td>${clean(p.startDate)}</td><td>${clean(p.dueDate)}</td>
           <td>${fmt(p.amount)}</td><td>${fmt(p.advance)}</td><td>${fmt(remain)}</td><td>${clean(p.paymentType)}</td>
           <td><span class="${statusCls(s)}">${s}</span></td>
           <td>
@@ -945,6 +1008,7 @@
         const p = state.finance.projects.find(x => x.id === b.getAttribute("data-edit-p")); if (!p) return;
         editState.projectId = p.id;
         el.pName.value = p.name; el.pClient.value = p.client; el.pStart.value = p.startDate; el.pDue.value = p.dueDate;
+        el.pClientLogin.value = p.clientLogin || "";
         el.pAmount.value = p.amount; el.pAdvance.value = p.advance; el.pType.value = p.paymentType; el.pStatus.value = p.status;
         setFormEditMode(el.projectForm, el.projectSubmitBtn, el.projectCancelEdit, true);
       }));
@@ -982,6 +1046,11 @@
       const s = summary();
       const finalTotal = s.founderRows.reduce((a, f) => a + num(f.final), 0);
       el.founderCalcList.innerHTML = [
+        `<li>Loyiha summasi: ${fmt(s.totalAmount)}</li>`,
+        `<li>Soliq: ${fmt(s.tax)}</li>`,
+        `<li>Zaxira: ${fmt(s.reserve)}</li>`,
+        `<li>Qo'lda kiritilgan umumiy xarajat: ${fmt(s.manualOther)}</li>`,
+        `<li>Xarajat bo'limi jami: ${fmt(s.explicitExpense)}</li>`,
         `<li>Ta'sischilar fondi (xarajatlardan keyin): ${fmt(s.founderPool)}</li>`,
         `<li>Ta'sischilar avansi jami: ${fmt(s.founderAdvanceTotal)}</li>`,
         `<li>Yakuniy bo'linadigan summa: ${fmt(finalTotal)}</li>`,
@@ -1144,6 +1213,7 @@
     function refreshAll() {
       fillExpenseRelatedSelects();
       renderSummary();
+      renderProjectAlerts();
       renderProjects();
       renderWorkers();
       renderFounders();
@@ -1275,7 +1345,8 @@
         e.preventDefault();
         const rec = {
           id: editState.projectId || uid(),
-          name: clean(el.pName.value), client: clean(el.pClient.value), startDate: el.pStart.value, dueDate: el.pDue.value,
+          name: clean(el.pName.value), client: clean(el.pClient.value), clientLogin: clean(el.pClientLogin.value).toLowerCase(),
+          startDate: el.pStart.value, dueDate: el.pDue.value,
           amount: num(el.pAmount.value), advance: num(el.pAdvance.value), paymentType: clean(el.pType.value), status: clean(el.pStatus.value)
         };
         if (!rec.name || !rec.client || !rec.startDate || !rec.dueDate) return msg(el.projectMsg, "Majburiy maydonlarni to'ldiring.", "err");
@@ -1356,7 +1427,6 @@
         if (!username || password.length < 8) return msg(el.userMsg, "Login kiriting, parol kamida 8 belgi.", "err");
         const checks = Array.from(el.permGrid.querySelectorAll("input[data-perm]:checked")).map(i => i.getAttribute("data-perm"));
         const permissions = role === "admin" ? checks : defaultPermsByRole(role);
-        const email = username + "@planetprint.local";
         try {
           // Create user via server API (uses admin SDK)
           const token = localStorage.getItem(TOKEN_KEY);

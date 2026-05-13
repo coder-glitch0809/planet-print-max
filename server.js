@@ -177,9 +177,39 @@ function canAccess(req, perm) {
   return permissions.includes(perm);
 }
 
+function clientProjectView(project) {
+  return {
+    id: project.id,
+    name: project.name,
+    client: project.client,
+    clientLogin: project.clientLogin,
+    startDate: project.startDate,
+    dueDate: project.dueDate,
+    status: project.status
+  };
+}
+
 function visibleFinanceForUser(req, finance) {
   const full = normalizeFinance(finance);
   if (req.user?.role === "super_admin") return full;
+  if (req.user?.role === "client") {
+    const username = String(req.user.username || "").toLowerCase();
+    const assignedProjects = full.projects
+      .filter((project) => {
+        const clientLogin = String(project.clientLogin || "").toLowerCase();
+        const clientUserId = String(project.clientUserId || "");
+        const clientName = String(project.client || "").toLowerCase();
+        return clientUserId === req.user.id || clientLogin === username || clientName === username;
+      })
+      .map(clientProjectView);
+    return {
+      projects: assignedProjects,
+      workers: [],
+      founders: [],
+      expenses: [],
+      settings: { tax: 0, reserve: 0, other: 0 }
+    };
+  }
   return {
     projects: canAccess(req, "projects") || canAccess(req, "dashboard") ? full.projects : [],
     workers: canAccess(req, "workers") ? full.workers : [],
@@ -193,6 +223,7 @@ function mergeFinanceForUser(req, currentFinance, incomingFinance) {
   const current = normalizeFinance(currentFinance);
   const incoming = normalizeFinance(incomingFinance);
   if (req.user?.role === "super_admin") return incoming;
+  if (req.user?.role === "client") return current;
 
   const next = { ...current };
   if (canAccess(req, "projects")) next.projects = incoming.projects;
@@ -505,7 +536,7 @@ app.post("/api/users", authRequired, superAdminRequired, async (req, res) => {
   const permissions = Array.isArray(req.body?.permissions) ? req.body.permissions.map(x => sanitizeText(x, 30)).filter(Boolean) : [];
 
   if (!username || password.length < 8) return res.status(400).json({ error: "Invalid credentials" });
-  if (!["admin", "manager", "viewer"].includes(role)) return res.status(400).json({ error: "Invalid role" });
+  if (!["admin", "manager", "viewer", "client"].includes(role)) return res.status(400).json({ error: "Invalid role" });
 
   const passHash = await bcrypt.hash(password, 10);
   const id = Math.random().toString(36).slice(2, 10);
