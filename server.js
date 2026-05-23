@@ -285,32 +285,38 @@ function sanitizeText(text, max = 120) {
 }
 
 app.use(express.json({ limit: "5mb" }));
-app.use(express.static(__dirname));
+app.use("/assets", express.static(path.join(__dirname, "assets")));
+app.get("/styles.css", (_req, res) => res.sendFile(path.join(__dirname, "styles.css")));
+app.get("/app.js", (_req, res) => res.sendFile(path.join(__dirname, "app.js")));
 
-const dbReady = initDb();
+let dbInitError = null;
+const dbReady = initDb().catch((err) => {
+  dbInitError = err;
+  firestore = null;
+  console.error("Firebase startup failed, fallback mode enabled:", err.message);
+});
 
 app.use("/api", async (_req, res, next) => {
-  try {
-    await dbReady;
-    next();
-  } catch (err) {
-    console.error("Firebase startup failed:", err.message);
-    res.status(500).json({ error: "Server database is not configured" });
-  }
+  await dbReady;
+  next();
 });
 
 // --- API Routes ---
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, now: new Date().toISOString(), db: !!firestore });
+  res.json({ ok: true, now: new Date().toISOString(), db: !!firestore, fallback: !!dbInitError });
 });
 
 app.get("/api/auth/setup-status", async (_req, res) => {
+  if (!firestore) return res.json({ needsSetup: false, fallback: true });
   const usersSnapshot = await firestore.collection("users").limit(1).get();
   res.json({ needsSetup: usersSnapshot.empty });
 });
 
 app.post("/api/auth/setup", async (req, res) => {
+  if (!firestore) {
+    return res.status(503).json({ error: "Firebase ulanmagan. Vaqtinchalik admin login orqali kiring." });
+  }
   const usersSnapshot = await firestore.collection("users").limit(1).get();
   if (!usersSnapshot.empty) {
     return res.status(400).json({ error: "Setup already done" });
@@ -476,6 +482,13 @@ app.get("/api/auth/me", authRequired, async (req, res) => {
 });
 
 app.get("/api/finance", authRequired, async (req, res) => {
+  if (!firestore || req.user.id === "fallback-super-admin" || memoryStore.users.some((user) => user.id === req.user.id)) {
+    return res.json({
+      finance: visibleFinanceForUser(req, memoryStore.finance),
+      updatedAt: Date.now(),
+      storage: "memory"
+    });
+  }
   const financeDoc = await firestore.collection("settings").doc("finance").get();
   const financeData = financeDoc.exists ? financeDoc.data() : { data: DEFAULT_FINANCE };
   let finance = financeData.data ?? financeData;
@@ -493,6 +506,10 @@ app.put("/api/finance", authRequired, async (req, res) => {
   if (!finance || typeof finance !== "object") return res.status(400).json({ error: "Invalid payload" });
   if (!FINANCE_PERMS.some((perm) => canAccess(req, perm))) {
     return res.status(403).json({ error: "Forbidden" });
+  }
+  if (!firestore || req.user.id === "fallback-super-admin" || memoryStore.users.some((user) => user.id === req.user.id)) {
+    memoryStore.finance = mergeFinanceForUser(req, memoryStore.finance, finance);
+    return res.json({ ok: true, storage: "memory" });
   }
   const financeDoc = await firestore.collection("settings").doc("finance").get();
   const financeData = financeDoc.exists ? financeDoc.data() : { data: DEFAULT_FINANCE };
