@@ -55,6 +55,16 @@
 
     <section id="appSection" class="hidden">
       <div id="sidebarBackdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+      <div id="paymentLock" class="payment-lock hidden" role="dialog" aria-modal="true" aria-labelledby="paymentLockTitle">
+        <div class="payment-lock-card card">
+          <h2 id="paymentLockTitle" class="section-title">To'lov sanasi</h2>
+          <p id="paymentLockText" class="section-help"></p>
+          <div class="actions">
+            <button id="markPaidBtn" type="button">To'lov qilindi</button>
+          </div>
+          <div id="paymentLockMsg" class="msg"></div>
+        </div>
+      </div>
       <aside id="sidebar" class="sidebar" aria-label="Asosiy navigatsiya">
         <div class="brand-row">
           <div class="logo-mark small" aria-label="Planet Print logo"><img src="assets/photo_2025-01-30_14-49-44.jpg" alt="Planet Print logo" /></div>
@@ -268,6 +278,19 @@
             <table class="expense-table">
               <thead><tr><th>Sana</th><th>Turi</th><th>Summa</th><th>To'lov</th><th>Ishchi/Ta'sischi</th><th>Izoh</th><th>Amal</th></tr></thead>
               <tbody id="expensesBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="archive" class="page">
+        <div class="panel card">
+          <h2 class="section-title">Arxiv</h2>
+          <p id="archiveSummary" class="section-help">Arxivlangan loyihalar va xarajatlar.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Oy</th><th>Loyiha</th><th>Mijoz</th><th>Summa</th><th>Oldindan</th><th>Qarz</th><th>Holat</th><th>Amal</th></tr></thead>
+              <tbody id="archiveBody"></tbody>
             </table>
           </div>
         </div>

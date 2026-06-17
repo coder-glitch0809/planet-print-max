@@ -30,6 +30,8 @@ const DEFAULT_FINANCE = {
   workers: [],
   founders: [],
   expenses: [],
+  archives: [],
+  payment: { lastArchiveMonth: "", lastPaidMonth: "" },
   settings: { tax: 0, reserve: 0, other: 0 }
 };
 const FINANCE_PERMS = ["dashboard", "projects", "workers", "founders", "expenses", "settings"];
@@ -163,6 +165,14 @@ function normalizeFinance(finance) {
     workers: Array.isArray(src.workers) ? src.workers : [],
     founders: Array.isArray(src.founders) ? src.founders : [],
     expenses: Array.isArray(src.expenses) ? src.expenses : [],
+    archives: Array.isArray(src.archives) ? src.archives : [],
+    payment: {
+      lastArchiveMonth: sanitizeText(src.payment?.lastArchiveMonth, 12),
+      lastPaidMonth: sanitizeText(src.payment?.lastPaidMonth, 12),
+      currentMonth: sanitizeText(src.payment?.currentMonth, 12),
+      dueDay: Number(src.payment?.dueDay) || 5,
+      locked: !!src.payment?.locked
+    },
     settings: {
       tax: Number(src.settings?.tax) || 0,
       reserve: Number(src.settings?.reserve) || 0,
@@ -171,8 +181,62 @@ function normalizeFinance(finance) {
   };
 }
 
+function tashkentDateParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tashkent",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date).reduce((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {});
+  return {
+    year: parts.year,
+    month: parts.month,
+    day: Number(parts.day),
+    monthKey: `${parts.year}-${parts.month}`
+  };
+}
+
+function archiveOpenCycle(finance) {
+  const next = normalizeFinance(finance);
+  const now = tashkentDateParts();
+  const shouldArchive = now.day >= 5 && next.payment.lastArchiveMonth !== now.monthKey;
+  if (!shouldArchive) return next;
+
+  if (next.projects.length || next.expenses.length) {
+    next.archives.unshift({
+      id: `archive-${now.monthKey}-${Date.now()}`,
+      month: now.monthKey,
+      archivedAt: new Date().toISOString(),
+      projects: next.projects.map((project) => ({
+        ...project,
+        debtClosed: Number(project.advance) >= Number(project.amount),
+        debtClosedAt: Number(project.advance) >= Number(project.amount) ? new Date().toISOString() : ""
+      })),
+      expenses: next.expenses
+    });
+  }
+
+  next.projects = [];
+  next.expenses = [];
+  next.payment.lastArchiveMonth = now.monthKey;
+  return next;
+}
+
+function addPaymentLockInfo(finance) {
+  const next = normalizeFinance(finance);
+  const now = tashkentDateParts();
+  next.payment.currentMonth = now.monthKey;
+  next.payment.dueDay = 5;
+  next.payment.locked = now.day >= 5 && next.payment.lastPaidMonth !== now.monthKey;
+  return next;
+}
+
 function canAccess(req, perm) {
   if (req.user?.role === "super_admin") return true;
+  if (req.user?.role === "admin" && FINANCE_PERMS.includes(perm)) return true;
   const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
   return permissions.includes(perm);
 }
@@ -207,6 +271,8 @@ function visibleFinanceForUser(req, finance) {
       workers: [],
       founders: [],
       expenses: [],
+      archives: [],
+      payment: full.payment,
       settings: { tax: 0, reserve: 0, other: 0 }
     };
   }
@@ -215,6 +281,8 @@ function visibleFinanceForUser(req, finance) {
     workers: canAccess(req, "workers") ? full.workers : [],
     founders: canAccess(req, "founders") ? full.founders : [],
     expenses: canAccess(req, "expenses") ? full.expenses : [],
+    archives: canAccess(req, "dashboard") || canAccess(req, "projects") || canAccess(req, "expenses") ? full.archives : [],
+    payment: full.payment,
     settings: canAccess(req, "settings") ? full.settings : { tax: 0, reserve: 0, other: 0 }
   };
 }
@@ -231,6 +299,8 @@ function mergeFinanceForUser(req, currentFinance, incomingFinance) {
   if (canAccess(req, "founders")) next.founders = incoming.founders;
   if (canAccess(req, "expenses")) next.expenses = incoming.expenses;
   if (canAccess(req, "settings")) next.settings = incoming.settings;
+  next.archives = current.archives;
+  next.payment = current.payment;
   return next;
 }
 
@@ -483,6 +553,7 @@ app.get("/api/auth/me", authRequired, async (req, res) => {
 
 app.get("/api/finance", authRequired, async (req, res) => {
   if (!firestore || req.user.id === "fallback-super-admin" || memoryStore.users.some((user) => user.id === req.user.id)) {
+    memoryStore.finance = addPaymentLockInfo(archiveOpenCycle(memoryStore.finance));
     return res.json({
       finance: visibleFinanceForUser(req, memoryStore.finance),
       updatedAt: Date.now(),
@@ -493,7 +564,15 @@ app.get("/api/finance", authRequired, async (req, res) => {
   const financeData = financeDoc.exists ? financeDoc.data() : { data: DEFAULT_FINANCE };
   let finance = financeData.data ?? financeData;
   if (typeof finance === "string") finance = safeJsonParse(finance, DEFAULT_FINANCE);
-  finance = normalizeFinance(finance);
+  const preparedFinance = archiveOpenCycle(finance);
+  finance = addPaymentLockInfo(preparedFinance);
+
+  if (JSON.stringify(normalizeFinance(preparedFinance)) !== JSON.stringify(normalizeFinance(financeData.data ?? financeData))) {
+    await firestore.collection("settings").doc("finance").set({
+      data: normalizeFinance(preparedFinance),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+  }
 
   res.json({
     finance: visibleFinanceForUser(req, finance),
@@ -508,20 +587,53 @@ app.put("/api/finance", authRequired, async (req, res) => {
     return res.status(403).json({ error: "Forbidden" });
   }
   if (!firestore || req.user.id === "fallback-super-admin" || memoryStore.users.some((user) => user.id === req.user.id)) {
-    memoryStore.finance = mergeFinanceForUser(req, memoryStore.finance, finance);
+    const current = addPaymentLockInfo(archiveOpenCycle(memoryStore.finance));
+    if (current.payment.locked && req.user.role !== "super_admin") {
+      return res.status(423).json({ error: "To'lov sanasi. Super admin to'lov qilindi deb belgilamaguncha tizim yopiq." });
+    }
+    memoryStore.finance = mergeFinanceForUser(req, current, finance);
     return res.json({ ok: true, storage: "memory" });
   }
   const financeDoc = await firestore.collection("settings").doc("finance").get();
   const financeData = financeDoc.exists ? financeDoc.data() : { data: DEFAULT_FINANCE };
   let currentFinance = financeData.data ?? financeData;
   if (typeof currentFinance === "string") currentFinance = safeJsonParse(currentFinance, DEFAULT_FINANCE);
+  currentFinance = addPaymentLockInfo(archiveOpenCycle(currentFinance));
+  if (currentFinance.payment.locked && req.user.role !== "super_admin") {
+    return res.status(423).json({ error: "To'lov sanasi. Super admin to'lov qilindi deb belgilamaguncha tizim yopiq." });
+  }
   const mergedFinance = mergeFinanceForUser(req, currentFinance, finance);
   
   await firestore.collection("settings").doc("finance").set({
-    data: mergedFinance,
+    data: normalizeFinance(mergedFinance),
     updatedAt: admin.firestore.FieldValue.serverTimestamp()
   });
   res.json({ ok: true });
+});
+
+app.post("/api/payment/mark-paid", authRequired, superAdminRequired, async (_req, res) => {
+  const now = tashkentDateParts();
+
+  if (!firestore || _req.user.id === "fallback-super-admin" || memoryStore.users.some((user) => user.id === _req.user.id)) {
+    const finance = addPaymentLockInfo(archiveOpenCycle(memoryStore.finance));
+    finance.payment.lastPaidMonth = now.monthKey;
+    memoryStore.finance = addPaymentLockInfo(finance);
+    return res.json({ ok: true, finance: visibleFinanceForUser(_req, memoryStore.finance), storage: "memory" });
+  }
+
+  const financeDoc = await firestore.collection("settings").doc("finance").get();
+  const financeData = financeDoc.exists ? financeDoc.data() : { data: DEFAULT_FINANCE };
+  let finance = financeData.data ?? financeData;
+  if (typeof finance === "string") finance = safeJsonParse(finance, DEFAULT_FINANCE);
+  finance = addPaymentLockInfo(archiveOpenCycle(finance));
+  finance.payment.lastPaidMonth = now.monthKey;
+
+  await firestore.collection("settings").doc("finance").set({
+    data: normalizeFinance(finance),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+  });
+
+  res.json({ ok: true, finance: visibleFinanceForUser(_req, addPaymentLockInfo(finance)) });
 });
 
 app.get("/api/users", authRequired, superAdminRequired, async (_req, res) => {

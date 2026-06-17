@@ -199,6 +199,31 @@
     .super-only-note { display: none; margin-top: 12px; color: var(--muted); font-size: 14px; }
     .is-limited .super-only { display: none !important; }
     .is-limited .super-only-note { display: block; }
+    .payment-lock {
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: rgba(4, 16, 29, .72);
+      backdrop-filter: blur(8px);
+    }
+    .payment-lock-card {
+      width: min(460px, 100%);
+      padding: 24px;
+      text-align: left;
+    }
+    .payment-is-locked .main-area,
+    .payment-is-locked .sidebar {
+      pointer-events: none;
+      user-select: none;
+    }
+    .archive-expense-row td {
+      color: var(--muted);
+      background: var(--panel-soft);
+      font-weight: 700;
+    }
     @media (max-width: 1100px) {
       #appSection { grid-template-columns: 1fr; }
       .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
