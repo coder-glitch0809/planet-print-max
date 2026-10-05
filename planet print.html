@@ -266,6 +266,10 @@
                 <label for="eFounderId">Ta'sischi</label>
                 <select id="eFounderId"></select>
               </div>
+              <div>
+                <label for="eProjectId">Qaysi zakaz mablag'idan</label>
+                <select id="eProjectId"></select>
+              </div>
             </div>
             <div class="actions">
               <button id="expenseSubmitBtn" type="submit">Xarajat qo'shish</button>
@@ -276,9 +280,19 @@
           </form>
           <div class="table-wrap">
             <table class="expense-table">
-              <thead><tr><th>Sana</th><th>Turi</th><th>Summa</th><th>To'lov</th><th>Ishchi/Ta'sischi</th><th>Izoh</th><th>Amal</th></tr></thead>
+              <thead><tr><th>Sana</th><th>Turi</th><th>Summa</th><th>To'lov</th><th>Ishchi/Ta'sischi</th><th>Zakaz mablag'i</th><th>Izoh</th><th>Amal</th></tr></thead>
               <tbody id="expensesBody"></tbody>
             </table>
+          </div>
+          <div class="card panel order-expense-panel">
+            <h3 class="section-title" style="font-size:18px;">Zakazlar bo'yicha xarajatlar va ta'sischi avanslari</h3>
+            <p class="section-help">Qoldiq zakazning umumiy summasidan unga biriktirilgan xarajatlar va ta'sischi avanslarini ayirish orqali hisoblanadi. Avans berilmagan bo'lsa, "Olinmagan" deb ko'rsatiladi. Zakazsiz umumiy xarajatlar alohida jamlanadi.</p>
+            <div class="table-wrap">
+              <table class="expense-table">
+                <thead><tr><th>Zakaz</th><th>Zakaz summasi</th><th>Xarajatlar</th><th>Ta'sischi olgan avans</th><th>Jami sarf</th><th>Zakaz summasidan qoldiq</th></tr></thead>
+                <tbody id="orderExpensesBody"></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </section>
@@ -346,4 +360,3 @@
   <script src="app.js"></script>
 </body>
 </html>
-

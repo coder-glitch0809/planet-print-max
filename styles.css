@@ -169,6 +169,8 @@
     .check-list { padding-left: 0; list-style: none; display: grid; gap: 8px; }
     .check-list li { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel-soft); }
     .table-wrap { margin-top: 14px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+    .order-expense-panel { margin-top: 18px; box-shadow: none; }
+    .expense-order-detail { margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.45; }
     table { width: 100%; border-collapse: collapse; min-width: 980px; background: var(--panel); }
     th, td { border-bottom: 1px solid var(--line); padding: 12px 10px; text-align: left; font-size: 13px; vertical-align: middle; }
     th { background: var(--panel-soft); color: var(--text); position: sticky; top: 0; }
@@ -549,4 +551,3 @@ canvas { border-radius: 14px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
-

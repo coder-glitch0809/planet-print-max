@@ -131,10 +131,12 @@ const TOKEN_KEY = "pp_token_v1";
       ePaymentType: document.getElementById("ePaymentType"), eNote: document.getElementById("eNote"),
       eWorkerWrap: document.getElementById("eWorkerWrap"), eWorkerId: document.getElementById("eWorkerId"),
       eFounderWrap: document.getElementById("eFounderWrap"), eFounderId: document.getElementById("eFounderId"),
+      eProjectId: document.getElementById("eProjectId"),
       expenseSubmitBtn: document.getElementById("expenseSubmitBtn"),
       expenseCancelEdit: document.getElementById("expenseCancelEdit"),
       expenseReset: document.getElementById("expenseReset"), expenseMsg: document.getElementById("expenseMsg"),
       expensesBody: document.getElementById("expensesBody"),
+      orderExpensesBody: document.getElementById("orderExpensesBody"),
       archiveBody: document.getElementById("archiveBody"),
       archiveSummary: document.getElementById("archiveSummary"),
       paymentLock: document.getElementById("paymentLock"),
@@ -559,7 +561,7 @@ const TOKEN_KEY = "pp_token_v1";
       if (!state.finance.founders.length) { el.foundersBody.innerHTML = `<tr><td colspan="7">Hozircha ta'sischi yo'q.</td></tr>`; return; }
       el.foundersBody.innerHTML = s.founderRows.map((f) => `<tr>
         <td>${clean(f.name)}</td><td>${num(f.share).toFixed(2)}%</td><td>${clean(f.note || "-")}</td>
-        <td>${fmt(f.base)}</td><td>${fmt(f.founderAdvance)}</td><td>${fmt(f.final)}</td>
+        <td>${fmt(f.base)}</td><td>${fmt(f.founderAdvance)}<div class="expense-order-detail">${founderAdvanceProjectDetails(f.id)}</div></td><td>${fmt(f.final)}</td>
         <td>
           <button class="ghost small-btn" type="button" data-edit-f="${f.id}">Tahrirlash</button>
           <button class="danger small-btn" type="button" data-del-f="${f.id}">O'chirish</button>
@@ -582,22 +584,110 @@ const TOKEN_KEY = "pp_token_v1";
     function fillExpenseRelatedSelects() {
       el.eWorkerId.innerHTML = state.finance.workers.map(w => `<option value="${w.id}">${clean(w.name)} (${clean(w.role)})</option>`).join("");
       el.eFounderId.innerHTML = state.finance.founders.map(f => `<option value="${f.id}">${clean(f.name)}</option>`).join("");
+      el.eProjectId.innerHTML = `<option value="">Umumiy xarajat (zakazga biriktirilmagan)</option>` +
+        state.finance.projects.map(p => `<option value="${clean(p.id)}">${clean(p.name)}${p.client ? ` — ${clean(p.client)}` : ""}</option>`).join("");
     }
     function toggleExpenseTypeInputs() {
       const t = el.eType.value;
       el.eWorkerWrap.classList.toggle("hidden", t !== "oylik_avans");
       el.eFounderWrap.classList.toggle("hidden", t !== "founder_avans");
+      el.eProjectId.required = t === "founder_avans";
+    }
+
+    function projectNameForExpense(expense) {
+      const project = state.finance.projects.find(p => p.id === expense.sourceProjectId);
+      return project?.name || expense.sourceProjectName || "";
+    }
+
+    function founderAdvanceProjectDetails(founderId) {
+      const grouped = new Map();
+      state.finance.expenses
+        .filter(e => e.type === "founder_avans" && e.founderId === founderId)
+        .forEach(e => {
+          const projectKey = e.sourceProjectId || "unassigned";
+          const projectName = projectNameForExpense(e) || "Zakaz ko'rsatilmagan";
+          const current = grouped.get(projectKey) || { name: projectName, amount: 0 };
+          current.amount += num(e.amount);
+          grouped.set(projectKey, current);
+        });
+      if (!grouped.size) return "Hozircha avans olinmagan";
+      return Array.from(grouped.values(), item => `${clean(item.name)}: ${fmt(item.amount)}`).join("<br>");
+    }
+
+    function renderOrderExpenseSummary() {
+      const projectTotals = new Map();
+      state.finance.projects.forEach(project => projectTotals.set(project.id, {
+        project,
+        projectName: project.name,
+        expenses: 0,
+        founderAdvances: new Map()
+      }));
+      const unassigned = { expenses: 0, founderAdvances: new Map() };
+
+      state.finance.expenses.forEach(expense => {
+        let totals = projectTotals.get(expense.sourceProjectId);
+        if (!totals && expense.sourceProjectId) {
+          totals = {
+            project: null,
+            projectName: expense.sourceProjectName || "O'chirilgan zakaz",
+            expenses: 0,
+            founderAdvances: new Map()
+          };
+          projectTotals.set(expense.sourceProjectId, totals);
+        }
+        totals = totals || unassigned;
+        if (expense.type === "founder_avans") {
+          const founderKey = expense.founderId || "unknown";
+          totals.founderAdvances.set(founderKey, (totals.founderAdvances.get(founderKey) || 0) + num(expense.amount));
+        } else {
+          totals.expenses += num(expense.amount);
+        }
+      });
+
+      const rows = Array.from(projectTotals.values()).map(({ project, projectName, expenses, founderAdvances }) => {
+        const advances = Array.from(founderAdvances, ([founderId, amount]) => {
+          const name = state.finance.founders.find(f => f.id === founderId)?.name || "Noma'lum ta'sischi";
+          return `${clean(name)}: ${fmt(amount)}`;
+        }).join("<br>");
+        const advanceTotal = Array.from(founderAdvances.values()).reduce((sum, amount) => sum + amount, 0);
+        const projectAmount = project ? num(project.amount) : null;
+        const remaining = projectAmount === null ? null : projectAmount - expenses - advanceTotal;
+        return `<tr>
+          <td>${clean(projectName)}${project ? "" : " (faol emas)"}</td><td>${project ? fmt(projectAmount) : "-"}</td><td>${fmt(expenses)}</td>
+          <td>${advances || "Olinmagan"}</td><td>${fmt(expenses + advanceTotal)}</td><td>${remaining === null ? "-" : fmt(remaining)}</td>
+        </tr>`;
+      });
+
+      const unassignedAdvanceTotal = Array.from(unassigned.founderAdvances.values()).reduce((sum, amount) => sum + amount, 0);
+      if (unassigned.expenses || unassignedAdvanceTotal) {
+        const advances = Array.from(unassigned.founderAdvances, ([founderId, amount]) => {
+          const name = state.finance.founders.find(f => f.id === founderId)?.name || "Noma'lum ta'sischi";
+          return `${clean(name)}: ${fmt(amount)}`;
+        }).join("<br>");
+        rows.push(`<tr>
+          <td>Umumiy / eski yozuvlar (zakaz ko'rsatilmagan)</td><td>-</td><td>${fmt(unassigned.expenses)}</td>
+          <td>${advances || "Olinmagan"}</td><td>${fmt(unassigned.expenses + unassignedAdvanceTotal)}</td><td>-</td>
+        </tr>`);
+      }
+      el.orderExpensesBody.innerHTML = rows.length
+        ? rows.join("")
+        : `<tr><td colspan="6">Hozircha zakazlar yoki xarajatlar yo'q.</td></tr>`;
     }
 
     function renderExpenses() {
-      if (!state.finance.expenses.length) { el.expensesBody.innerHTML = `<tr><td colspan="7">Hozircha xarajat yo'q.</td></tr>`; return; }
+      if (!state.finance.expenses.length) {
+        el.expensesBody.innerHTML = `<tr><td colspan="8">Hozircha xarajat yo'q.</td></tr>`;
+        renderOrderExpenseSummary();
+        return;
+      }
       el.expensesBody.innerHTML = state.finance.expenses.map((e) => {
         const worker = e.workerId ? state.finance.workers.find(w => w.id === e.workerId)?.name : "";
         const founder = e.founderId ? state.finance.founders.find(f => f.id === e.founderId)?.name : "";
         const target = worker || founder || "-";
+        const sourceProject = projectNameForExpense(e) || "Umumiy / zakaz ko'rsatilmagan";
         const paymentType = EXPENSE_PAYMENT_LABEL[e.paymentType] || (e.paymentType ? clean(e.paymentType) : "Ko'rsatilmagan");
         return `<tr>
-          <td>${clean(e.date)}</td><td>${EXPENSE_LABEL[e.type] || clean(e.type)}</td><td>${fmt(e.amount)}</td><td>${paymentType}</td><td>${clean(target)}</td><td>${clean(e.note || "-")}</td>
+          <td>${clean(e.date)}</td><td>${EXPENSE_LABEL[e.type] || clean(e.type)}</td><td>${fmt(e.amount)}</td><td>${paymentType}</td><td>${clean(target)}</td><td>${clean(sourceProject)}</td><td>${clean(e.note || "-")}</td>
           <td>
             <button class="ghost small-btn" type="button" data-edit-e="${e.id}">Tahrirlash</button>
             <button class="danger small-btn" type="button" data-del-e="${e.id}">O'chirish</button>
@@ -615,8 +705,16 @@ const TOKEN_KEY = "pp_token_v1";
         fillExpenseRelatedSelects(); toggleExpenseTypeInputs();
         if (e.workerId) el.eWorkerId.value = e.workerId;
         if (e.founderId) el.eFounderId.value = e.founderId;
+        if (e.sourceProjectId && !Array.from(el.eProjectId.options).some(option => option.value === e.sourceProjectId)) {
+          const oldProject = document.createElement("option");
+          oldProject.value = clean(e.sourceProjectId);
+          oldProject.textContent = `${clean(e.sourceProjectName || "O'chirilgan zakaz")} (faol emas)`;
+          el.eProjectId.appendChild(oldProject);
+        }
+        el.eProjectId.value = e.sourceProjectId || "";
         setFormEditMode(el.expenseForm, el.expenseSubmitBtn, el.expenseCancelEdit, true);
       }));
+      renderOrderExpenseSummary();
     }
 
     function archiveDebt(project) {
@@ -1002,6 +1100,11 @@ const TOKEN_KEY = "pp_token_v1";
       el.expenseForm.addEventListener("submit", (e) => {
         e.preventDefault();
         if (blockIfPaymentLocked(el.expenseMsg)) return;
+        const existingExpense = editState.expenseId
+          ? state.finance.expenses.find(x => x.id === editState.expenseId)
+          : null;
+        const sourceProjectId = el.eProjectId.value || null;
+        const sourceProject = state.finance.projects.find(p => p.id === sourceProjectId);
         const rec = {
           id: editState.expenseId || uid(),
           date: el.eDate.value || today(),
@@ -1010,7 +1113,9 @@ const TOKEN_KEY = "pp_token_v1";
           paymentType: clean(el.ePaymentType.value),
           note: clean(el.eNote.value),
           workerId: null,
-          founderId: null
+          founderId: null,
+          sourceProjectId,
+          sourceProjectName: sourceProject?.name || (sourceProjectId ? existingExpense?.sourceProjectName || "" : "")
         };
         if (!rec.date || rec.amount <= 0) return msg(el.expenseMsg, "Sana va summa to'g'ri bo'lsin.", "err");
         if (!EXPENSE_PAYMENT_LABEL[rec.paymentType]) return msg(el.expenseMsg, "To'lov turini tanlang.", "err");
@@ -1026,6 +1131,7 @@ const TOKEN_KEY = "pp_token_v1";
         if (rec.type === "founder_avans") {
           rec.founderId = el.eFounderId.value;
           if (!rec.founderId) return msg(el.expenseMsg, "Ta'sischini tanlang.", "err");
+          if (!rec.sourceProjectId) return msg(el.expenseMsg, "Ta'sischi avansi uchun zakazni tanlang.", "err");
         }
         if (editState.expenseId) state.finance.expenses = state.finance.expenses.map(x => x.id === rec.id ? rec : x);
         else state.finance.expenses.unshift(rec);
@@ -1140,4 +1246,3 @@ const TOKEN_KEY = "pp_token_v1";
     }
 
     init();
-
