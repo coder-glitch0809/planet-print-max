@@ -69,4 +69,12 @@ node scripts/test_firebase_credentials.js
 - `data/` papka server bazasi uchun (`SQLite`), `.gitignore`da ignore qilingan.
 - Productionda `JWT_SECRET` ni albatta almashtiring.
 - Bir nechta qurilmadan bir xil server URL ga kirilsa, hamma joyda bitta ma'lumotlar bazasi boshqariladi.
+- Xarajat, ishchi oyligi va avanslar bir yoki bir nechta zakazga to'liq taqsimlanadi; yangi mijoz to'lovlari ham zakazga bog'lanadi.
+- Oy almashganda tushumlar, xarajatlar, zakaz va xodim/ta'sischi snapshotlari arxivlanadi. Qarz qolgan zakazlar qoldiq summasi bilan keyingi oyga o'tadi.
+- `Hisobotlar` bo'limida arxiv va joriy ma'lumotlar bo'yicha oylik/yillik daromad-xarajat ko'rsatkichlari bor. Tanlangan oy yoki yil uchun `Excelga yuklash (.csv)` Excel ochadigan CSV faylini yuklab beradi.
+- `O'lchovlar` bo'limida joyga chiqish sanasi, manzil, mas'ul xodim, ixtiyoriy o'lchamlar va rasm qayd qilinadi. Super admin foydalanuvchilar sahifasida `Xodim` rolini berishi mumkin. O'lchov va dizayn rasmlari Telegram bot orqali yopiq media chatga yuklanadi; arxiv yopilganda yozuvlar ham saqlanadi.
+- `Dizayner` rolidagi foydalanuvchi zakazning moliyaviy ma'lumotlarini ko'rmasdan `Dizaynlar` bo'limida mijoz tasdiqlagan dizaynni montajchilar guruhiga yuborishi mumkin. `Sozlamalar`dagi super admin e'loni ham xodimlar Telegram guruhiga yuboriladi.
+- Telegram integratsiyasi uchun lokal `.env` faylida, deploy qilinganda esa hosting provayderining Environment Variables bo'limida `TELEGRAM_BOT_TOKEN`, `TELEGRAM_INSTALLERS_CHAT_ID` va `TELEGRAM_MEDIA_CHAT_ID` ni belgilang. Media chat yopiq bo'lishi kerak: o'lchov va dizayn rasmlari u yerda saqlanadi; faqat tasdiqlangan dizayn montajchilar guruhiga yuboriladi. Bot ikkala chatga ham xabar yubora olishi kerak. Tokenni frontendga yoki ommaviy repozitoriyga joylamang.
+- Har oyning 1-sanasidan to'lov eslatmasi ko'rinadi. 5-sanasidan keyin super admin to'lovni tasdiqlamaguncha boshqa foydalanuvchilar uchun amallar bloklanadi; super admin ishlashda davom etadi va to'lov panelini chetda ko'radi.
+- Bo'limlar o'ziga xos rang bilan ajratilgan; tungi rejimda bo'lim rangi faqat urg'u rangiga ta'sir qiladi, fon va panellar qorong'i bo'lib qoladi.
 # planet-print-max

@@ -102,8 +102,24 @@
           <h2 class="section-title">Moliyaviy boshqaruv</h2>
           <p class="section-help">Planet Print uchun loyihalar, xarajatlar va huquqlar nazorati.</p>
         </div>
+        <div class="report-toolbar card">
+          <div><label for="dashboardYear">Hisobot yili</label><select id="dashboardYear"></select></div>
+          <div><label for="dashboardMonth">Oy</label><select id="dashboardMonth"></select></div>
+        </div>
         <div class="kpi-grid" id="kpiGrid"></div>
         <div id="projectAlerts" class="alert-stack"></div>
+        <div class="dashboard-overview">
+          <div class="card panel dashboard-trend">
+            <h3 class="section-title" style="font-size:18px;">Moliyaviy ko'rsatkichlar</h3>
+            <p class="section-help" id="dashboardChartCaption">Tanlangan davr bo'yicha daromad va xarajatlar</p>
+            <canvas id="financeTrendChart" width="720" height="260"></canvas>
+            <div id="financeTrendLegend" class="legend"></div>
+          </div>
+          <div class="card panel dashboard-status">
+            <h3 class="section-title" style="font-size:18px;">Loyihalar holati</h3>
+            <div id="projectStatusSummary"></div>
+          </div>
+        </div>
         <div id="calcCenter" class="panel card super-only">
           <h2 class="section-title">Hisob-kitob Markazi</h2>
           <p class="section-help">Xarajatlar bo'limi va avanslar hisobga olinadi. Ishchi avansi oylikdan, ta'sischi avansi ulushdan ayriladi.</p>
@@ -183,9 +199,53 @@
           </form>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Ism</th><th>Lavozim</th><th>Oylik</th><th>Avans olingan</th><th>Qolgan oylik</th><th>Amal</th></tr></thead>
+              <thead><tr><th>Ism</th><th>Lavozim</th><th>Oylik</th><th>Avans olingan</th><th>Oylik to'langan</th><th>Qolgan oylik</th><th>Amal</th></tr></thead>
               <tbody id="workersBody"></tbody>
             </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="measurements" class="page">
+        <div class="panel card">
+          <h2 class="section-title">Joyiga chiqish va o'lchovlar</h2>
+          <p class="section-help">Borgan manzil, mas'ul xodim va joy rasmi qayd qilinadi. O'lchamlar bo'lmasa bo'sh qoldiring.</p>
+          <form id="measurementForm" class="form-grid">
+            <div class="grid-3">
+              <div><label for="measurementDate">Sana</label><input id="measurementDate" type="date" required /></div>
+              <div><label for="measurementClient">Mijoz yoki obyekt nomi</label><input id="measurementClient" required maxlength="100" /></div>
+              <div><label for="measurementProject">Zakaz (ixtiyoriy)</label><select id="measurementProject"></select></div>
+              <div><label for="measurementAddress">Borgan manzil</label><input id="measurementAddress" required maxlength="200" /></div>
+              <div><label for="measurementWorker">Borgan xodim</label><input id="measurementWorker" required maxlength="100" /></div>
+              <div><label for="measurementPhoto">Joy rasmi</label><input id="measurementPhoto" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" required /></div>
+            </div>
+            <div><label for="measurementSizes">O'lchamlar (ixtiyoriy)</label><textarea id="measurementSizes" rows="3" maxlength="1500" placeholder="Masalan: old devor — 3.2 × 2.4 m; yon tomon — 1.5 × 2.4 m"></textarea></div>
+            <div><label for="measurementNote">Izoh</label><input id="measurementNote" maxlength="400" /></div>
+            <div class="actions"><button id="measurementSubmitBtn" type="submit">Joyga chiqishni saqlash</button></div>
+            <div id="measurementMsg" class="msg" role="status" aria-live="polite"></div>
+          </form>
+          <div class="table-wrap">
+            <table><thead><tr><th>Sana</th><th>Mijoz / zakaz</th><th>Manzil</th><th>Xodim</th><th>O'lchamlar</th><th>Rasm</th></tr></thead><tbody id="measurementsBody"></tbody></table>
+          </div>
+        </div>
+      </section>
+
+      <section id="designs" class="page">
+        <div class="panel card design-panel">
+          <h2 class="section-title">Tasdiqlangan dizaynni yuborish</h2>
+          <p class="section-help">Mijoz tasdiqlagan dizayn Telegramdagi montajchilar guruhiga yuboriladi.</p>
+          <form id="designForm" class="form-grid">
+            <div class="grid-3">
+              <div><label for="designProject">Zakaz</label><select id="designProject" required></select></div>
+              <div><label for="designImage">Dizayn rasmi</label><input id="designImage" type="file" accept="image/jpeg,image/png,image/webp" required /></div>
+              <div><label for="designNote">Montajchilarga izoh</label><input id="designNote" maxlength="400" placeholder="O'lcham, material yoki montaj bo'yicha izoh" /></div>
+            </div>
+            <label class="checkline"><input id="designApproved" type="checkbox" required /> Mijoz dizaynni tasdiqlagan</label>
+            <div class="actions"><button id="designSubmitBtn" type="submit">Tasdiqlangan dizaynni yuborish</button></div>
+            <div id="designMsg" class="msg" role="status" aria-live="polite"></div>
+          </form>
+          <div class="table-wrap">
+            <table><thead><tr><th>Sana</th><th>Zakaz</th><th>Izoh</th><th>Holat</th><th>Amal</th></tr></thead><tbody id="designsBody"></tbody></table>
           </div>
         </div>
       </section>
@@ -229,7 +289,7 @@
       <section id="expenses" class="page">
         <div class="panel card">
           <h2 class="section-title">Xarajatlar</h2>
-          <p class="section-help">Turlar: banner, arakal, rezka, reyka, dostavka, zapravka, suv, boshqa, oylik avans, ta'sischi avans. To'lov turi alohida ko'rsatiladi.</p>
+          <p class="section-help">Har bir xarajat, ishchi oyligi va avans bir yoki bir nechta zakazga to'liq taqsimlanishi shart.</p>
           <form id="expenseForm">
             <div class="grid-4">
               <div><label for="eDate">Sana</label><input id="eDate" type="date" required /></div>
@@ -244,6 +304,7 @@
                   <option value="zapravka">Zapravka</option>
                   <option value="suv">Suv</option>
                   <option value="boshqa">Boshqa</option>
+                  <option value="oylik_tolov">Ishchi oyligi</option>
                   <option value="oylik_avans">Oylik maosh avansi</option>
                   <option value="founder_avans">Ta'sischi avansi</option>
                 </select>
@@ -266,10 +327,11 @@
                 <label for="eFounderId">Ta'sischi</label>
                 <select id="eFounderId"></select>
               </div>
-              <div>
-                <label for="eProjectId">Qaysi zakaz mablag'idan</label>
-                <select id="eProjectId"></select>
-              </div>
+            </div>
+            <div class="allocation-editor">
+              <div class="allocation-heading"><div><strong>Zakazlarga taqsimlash</strong><p class="section-help">Xarajat summasi tanlangan zakazlarga to'liq taqsimlanishi shart.</p></div><button id="addAllocationBtn" class="ghost small-btn" type="button">+ Zakaz qo'shish</button></div>
+              <div id="expenseAllocations"></div>
+              <div id="allocationTotal" class="allocation-total"></div>
             </div>
             <div class="actions">
               <button id="expenseSubmitBtn" type="submit">Xarajat qo'shish</button>
@@ -297,13 +359,59 @@
         </div>
       </section>
 
+      <section id="payments" class="page">
+        <div class="panel card">
+          <div class="section-heading"><div><h2 class="section-title">Mijoz to'lovlari</h2><p class="section-help">Har bir tushum zakazga biriktiriladi va oylik/yillik daromad hisobotiga qo'shiladi.</p></div></div>
+          <form id="paymentForm">
+            <div class="grid-4">
+              <div><label for="paymentDate">Sana</label><input id="paymentDate" type="date" required /></div>
+              <div><label for="paymentProjectId">Zakaz</label><select id="paymentProjectId" required></select></div>
+              <div><label for="paymentAmount">Summa (UZS)</label><input id="paymentAmount" inputmode="decimal" required /></div>
+              <div><label for="paymentType">To'lov turi</label><select id="paymentType" required><option>Naqd</option><option>Karta</option><option>Bank o'tkazma</option><option>Aralash</option></select></div>
+              <div><label for="paymentNote">Izoh</label><input id="paymentNote" maxlength="160" /></div>
+            </div>
+            <div class="actions"><button type="submit">To'lov qo'shish</button></div>
+            <div id="paymentMsg" class="msg"></div>
+          </form>
+          <div class="table-wrap">
+            <table class="expense-table">
+              <thead><tr><th>Sana</th><th>Zakaz</th><th>Mijoz</th><th>Summa</th><th>To'lov turi</th><th>Izoh</th><th>Amal</th></tr></thead>
+              <tbody id="paymentsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="reports" class="page">
+        <div class="panel card">
+          <div class="section-heading"><div><h2 class="section-title">Moliyaviy hisobotlar</h2><p class="section-help">Arxiv va joriy davrdagi tushumlar hamda barcha xarajatlar.</p></div></div>
+          <div class="report-toolbar">
+            <div><label for="reportYear">Yil</label><select id="reportYear"></select></div>
+            <div><label for="reportMonth">Oy</label><select id="reportMonth"><option value="all">Yil bo'yicha</option></select></div>
+            <button id="exportReportBtn" type="button">Excelga yuklash (.csv)</button>
+          </div>
+          <div class="kpi-grid report-kpis" id="reportKpis"></div>
+          <div class="card panel">
+            <h3 class="section-title" style="font-size:18px;">Oylik daromad va xarajatlar</h3>
+            <canvas id="reportTrendChart" width="720" height="280"></canvas>
+            <div id="reportTrendLegend" class="legend"></div>
+          </div>
+          <div class="table-wrap">
+            <table class="expense-table">
+              <thead><tr><th>Oy</th><th>Daromad</th><th>Xarajat</th><th>Sof foyda</th><th>To'lovlar soni</th><th>Xarajatlar soni</th></tr></thead>
+              <tbody id="reportMonthsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <section id="archive" class="page">
         <div class="panel card">
           <h2 class="section-title">Arxiv</h2>
-          <p id="archiveSummary" class="section-help">Arxivlangan loyihalar va xarajatlar.</p>
+          <p id="archiveSummary" class="section-help">Oylar bo'yicha barcha ishlar, tushumlar, xarajatlar va to'lanmagan zakazlar.</p>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Oy</th><th>Loyiha</th><th>Mijoz</th><th>Summa</th><th>Oldindan</th><th>Qarz</th><th>Holat</th><th>Amal</th></tr></thead>
+              <thead><tr><th>Oy</th><th>Loyiha</th><th>Mijoz</th><th>Summa</th><th>To'langan</th><th>Qarz</th><th>Holat</th><th>Amal</th></tr></thead>
               <tbody id="archiveBody"></tbody>
             </table>
           </div>
@@ -318,7 +426,7 @@
               <div><label for="uName">Login</label><input id="uName" maxlength="32" required /></div>
               <div><label for="uEmail">Email</label><input id="uEmail" type="email" maxlength="128" required /></div>
               <div><label for="uPass">Parol</label><input id="uPass" type="password" maxlength="64" required /></div>
-              <div><label for="uRole">Roli</label><select id="uRole"><option value="admin">Admin</option><option value="manager">Manager</option><option value="viewer">Viewer</option><option value="client">Zakazchi</option></select></div>
+              <div><label for="uRole">Roli</label><select id="uRole"><option value="admin">Admin</option><option value="manager">Manager</option><option value="designer">Dizayner</option><option value="worker">Xodim</option><option value="viewer">Viewer</option><option value="client">Zakazchi</option></select></div>
             </div>
             <label class="checkline"><input id="uShowPass" type="checkbox" /> Parolni ko'rsatish</label>
             <div>
@@ -351,11 +459,25 @@
           </div>
           <div id="settingsMsg" class="msg"></div>
         </div>
+        <div class="panel card super-only">
+          <h2 class="section-title">Telegram orqali ishchilarga xabar</h2>
+          <p class="section-help">E'lon montajchilar guruhiga bot nomidan yuboriladi.</p>
+          <form id="announcementForm" class="form-grid">
+            <div><label for="announcementText">Xabar matni</label><textarea id="announcementText" rows="4" maxlength="3500" required placeholder="Platformadagi yangilik yoki ishchilar uchun e'lon"></textarea></div>
+            <div class="actions"><button type="submit">Telegram guruhiga yuborish</button></div>
+            <div id="announcementMsg" class="msg" role="status" aria-live="polite"></div>
+          </form>
+        </div>
       </section>
       </main>
       </div>
     </section>
   </div>
+
+  <dialog id="photoDialog" class="photo-dialog">
+    <form method="dialog" class="photo-dialog-actions"><button class="ghost small-btn" type="submit">Yopish</button></form>
+    <img id="photoPreview" alt="Yuklangan joy yoki dizayn rasmi" />
+  </dialog>
 
   <script src="app.js"></script>
 </body>

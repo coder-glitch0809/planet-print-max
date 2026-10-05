@@ -26,32 +26,38 @@ const TOKEN_KEY = "pp_token_v1";
       suv: "Suv",
       boshqa: "Boshqa",
       oylik_avans: "Oylik maosh avansi",
+      oylik_tolov: "Ishchi oyligi",
       founder_avans: "Ta'sischi avansi"
     };
-    const REAL_EXPENSE_TYPES = ["banner", "arakal", "rezka", "reyka", "dostavka", "zapravka", "suv", "boshqa", "oylik_avans"];
+    const REAL_EXPENSE_TYPES = ["banner", "arakal", "rezka", "reyka", "dostavka", "zapravka", "suv", "boshqa", "oylik_tolov", "oylik_avans"];
     const EXPENSE_PAYMENT_LABEL = {
       naqd: "Naqd",
       klik: "Klik",
       shot: "Shot (kartadan yechilgan)"
     };
 
-    const ALL_PERMS = ["dashboard", "projects", "workers", "founders", "expenses", "settings"];
+    const ALL_PERMS = ["dashboard", "projects", "designs", "workers", "founders", "expenses", "payments", "reports", "measurements", "settings"];
     const PAGE_TITLES = {
       dashboard: "Dashboard",
       projects: "Loyihalar",
+      designs: "Dizaynlar",
       workers: "Ishchilar",
       founders: "Ta'sischilar",
       expenses: "Xarajatlar",
+      payments: "To'lovlar",
+      reports: "Hisobotlar",
+      measurements: "O'lchovlar",
       archive: "Arxiv",
       users: "Foydalanuvchilar",
       settings: "Sozlamalar"
     };
     const CLIENT_PAGE_TITLES = { projects: "Zakazlarim" };
+    const MONTH_LABELS = ["Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun", "Iyul", "Avgust", "Sentabr", "Oktabr", "Noyabr", "Dekabr"];
 
     const editState = { projectId: null, workerId: null, founderId: null, expenseId: null };
 
     const state = {
-      finance: { projects: [], workers: [], founders: [], expenses: [], archives: [], payment: { locked: false, currentMonth: "", lastPaidMonth: "" }, settings: { tax: 0, reserve: 0, other: 0 } },
+      finance: { projects: [], payments: [], workers: [], founders: [], expenses: [], archives: [], measurements: [], designs: [], payment: { locked: false, reminder: false, currentMonth: "", lastPaidMonth: "" }, settings: { tax: 0, reserve: 0, other: 0 } },
       users: [],
       currentUser: null
     };
@@ -110,6 +116,22 @@ const TOKEN_KEY = "pp_token_v1";
       projectReset: document.getElementById("projectReset"), projectMsg: document.getElementById("projectMsg"),
       projectsHead: document.getElementById("projectsHead"),
       projectsBody: document.getElementById("projectsBody"),
+      designForm: document.getElementById("designForm"),
+      designProject: document.getElementById("designProject"),
+      designImage: document.getElementById("designImage"),
+      designNote: document.getElementById("designNote"),
+      designApproved: document.getElementById("designApproved"),
+      designSubmitBtn: document.getElementById("designSubmitBtn"),
+      designMsg: document.getElementById("designMsg"),
+      designsBody: document.getElementById("designsBody"),
+      paymentForm: document.getElementById("paymentForm"),
+      paymentDate: document.getElementById("paymentDate"),
+      paymentProjectId: document.getElementById("paymentProjectId"),
+      paymentAmount: document.getElementById("paymentAmount"),
+      paymentType: document.getElementById("paymentType"),
+      paymentNote: document.getElementById("paymentNote"),
+      paymentMsg: document.getElementById("paymentMsg"),
+      paymentsBody: document.getElementById("paymentsBody"),
 
       workerForm: document.getElementById("workerForm"),
       wName: document.getElementById("wName"), wRole: document.getElementById("wRole"), wSalary: document.getElementById("wSalary"),
@@ -117,6 +139,18 @@ const TOKEN_KEY = "pp_token_v1";
       workerCancelEdit: document.getElementById("workerCancelEdit"),
       workerReset: document.getElementById("workerReset"), workerMsg: document.getElementById("workerMsg"),
       workersBody: document.getElementById("workersBody"),
+      measurementForm: document.getElementById("measurementForm"),
+      measurementDate: document.getElementById("measurementDate"),
+      measurementClient: document.getElementById("measurementClient"),
+      measurementProject: document.getElementById("measurementProject"),
+      measurementAddress: document.getElementById("measurementAddress"),
+      measurementWorker: document.getElementById("measurementWorker"),
+      measurementPhoto: document.getElementById("measurementPhoto"),
+      measurementSizes: document.getElementById("measurementSizes"),
+      measurementNote: document.getElementById("measurementNote"),
+      measurementSubmitBtn: document.getElementById("measurementSubmitBtn"),
+      measurementMsg: document.getElementById("measurementMsg"),
+      measurementsBody: document.getElementById("measurementsBody"),
 
       founderForm: document.getElementById("founderForm"),
       fName: document.getElementById("fName"), fShare: document.getElementById("fShare"), fNote: document.getElementById("fNote"),
@@ -131,12 +165,27 @@ const TOKEN_KEY = "pp_token_v1";
       ePaymentType: document.getElementById("ePaymentType"), eNote: document.getElementById("eNote"),
       eWorkerWrap: document.getElementById("eWorkerWrap"), eWorkerId: document.getElementById("eWorkerId"),
       eFounderWrap: document.getElementById("eFounderWrap"), eFounderId: document.getElementById("eFounderId"),
-      eProjectId: document.getElementById("eProjectId"),
       expenseSubmitBtn: document.getElementById("expenseSubmitBtn"),
       expenseCancelEdit: document.getElementById("expenseCancelEdit"),
       expenseReset: document.getElementById("expenseReset"), expenseMsg: document.getElementById("expenseMsg"),
       expensesBody: document.getElementById("expensesBody"),
       orderExpensesBody: document.getElementById("orderExpensesBody"),
+      expenseAllocations: document.getElementById("expenseAllocations"),
+      addAllocationBtn: document.getElementById("addAllocationBtn"),
+      allocationTotal: document.getElementById("allocationTotal"),
+      dashboardYear: document.getElementById("dashboardYear"),
+      dashboardMonth: document.getElementById("dashboardMonth"),
+      dashboardChartCaption: document.getElementById("dashboardChartCaption"),
+      projectStatusSummary: document.getElementById("projectStatusSummary"),
+      financeTrendChart: document.getElementById("financeTrendChart"),
+      financeTrendLegend: document.getElementById("financeTrendLegend"),
+      reportYear: document.getElementById("reportYear"),
+      reportMonth: document.getElementById("reportMonth"),
+      reportKpis: document.getElementById("reportKpis"),
+      reportTrendChart: document.getElementById("reportTrendChart"),
+      reportTrendLegend: document.getElementById("reportTrendLegend"),
+      reportMonthsBody: document.getElementById("reportMonthsBody"),
+      exportReportBtn: document.getElementById("exportReportBtn"),
       archiveBody: document.getElementById("archiveBody"),
       archiveSummary: document.getElementById("archiveSummary"),
       paymentLock: document.getElementById("paymentLock"),
@@ -144,6 +193,11 @@ const TOKEN_KEY = "pp_token_v1";
       paymentLockText: document.getElementById("paymentLockText"),
       markPaidBtn: document.getElementById("markPaidBtn"),
       paymentLockMsg: document.getElementById("paymentLockMsg"),
+      announcementForm: document.getElementById("announcementForm"),
+      announcementText: document.getElementById("announcementText"),
+      announcementMsg: document.getElementById("announcementMsg"),
+      photoDialog: document.getElementById("photoDialog"),
+      photoPreview: document.getElementById("photoPreview"),
 
   userForm: document.getElementById("userForm"),
   uName: document.getElementById("uName"), uEmail: document.getElementById("uEmail"), uPass: document.getElementById("uPass"), uShowPass: document.getElementById("uShowPass"),
@@ -197,19 +251,27 @@ const TOKEN_KEY = "pp_token_v1";
       return data;
     }
 
+    function applyFinanceSnapshot(saved) {
+      state.finance.projects = Array.isArray(saved.projects) ? saved.projects : [];
+      state.finance.payments = Array.isArray(saved.payments) ? saved.payments : [];
+      state.finance.workers = Array.isArray(saved.workers) ? saved.workers : [];
+      state.finance.founders = Array.isArray(saved.founders) ? saved.founders : [];
+      state.finance.expenses = Array.isArray(saved.expenses) ? saved.expenses : [];
+      state.finance.archives = Array.isArray(saved.archives) ? saved.archives : [];
+      state.finance.measurements = Array.isArray(saved.measurements) ? saved.measurements : [];
+      state.finance.designs = Array.isArray(saved.designs) ? saved.designs : [];
+      state.finance.payment = saved.payment && typeof saved.payment === "object"
+        ? saved.payment
+        : { locked: false, reminder: false, currentMonth: "", lastPaidMonth: "" };
+      state.finance.settings = { tax: num(saved.settings?.tax), reserve: num(saved.settings?.reserve), other: num(saved.settings?.other) };
+    }
+
     async function loadFinance() {
       try {
         const data = await apiRequest("/api/finance");
-        const saved = data.finance || {};
-        state.finance.projects = Array.isArray(saved.projects) ? saved.projects : [];
-        state.finance.workers = Array.isArray(saved.workers) ? saved.workers : [];
-        state.finance.founders = Array.isArray(saved.founders) ? saved.founders : [];
-        state.finance.expenses = Array.isArray(saved.expenses) ? saved.expenses : [];
-        state.finance.archives = Array.isArray(saved.archives) ? saved.archives : [];
-        state.finance.payment = saved.payment && typeof saved.payment === "object" ? saved.payment : { locked: false, currentMonth: "", lastPaidMonth: "" };
-        state.finance.settings = { tax: num(saved.settings?.tax), reserve: num(saved.settings?.reserve), other: num(saved.settings?.other) };
+        applyFinanceSnapshot(data.finance || {});
       } catch {
-        state.finance = { projects: [], workers: [], founders: [], expenses: [], archives: [], payment: { locked: false, currentMonth: "", lastPaidMonth: "" }, settings: { tax: 0, reserve: 0, other: 0 } };
+        state.finance = { projects: [], payments: [], workers: [], founders: [], expenses: [], archives: [], measurements: [], designs: [], payment: { locked: false, reminder: false, currentMonth: "", lastPaidMonth: "" }, settings: { tax: 0, reserve: 0, other: 0 } };
       }
     }
     async function saveFinance() {
@@ -231,8 +293,10 @@ const TOKEN_KEY = "pp_token_v1";
     }
 
     function defaultPermsByRole(role) {
-      if (role === "admin") return ["dashboard", "projects", "workers", "founders", "expenses", "settings"];
-      if (role === "manager") return ["dashboard", "projects", "workers", "founders", "expenses"];
+      if (role === "admin") return ["dashboard", "projects", "workers", "founders", "expenses", "payments", "reports", "measurements", "settings"];
+      if (role === "manager") return ["dashboard", "projects", "designs", "workers", "founders", "expenses", "payments", "reports", "measurements"];
+      if (role === "designer") return ["designs"];
+      if (role === "worker") return ["measurements"];
       if (role === "client") return ["projects"];
       return ["dashboard"];
     }
@@ -240,6 +304,7 @@ const TOKEN_KEY = "pp_token_v1";
       if (!state.currentUser) return false;
       if (state.currentUser.role === "super_admin") return true;
       if (state.currentUser.role === "admin" && ALL_PERMS.includes(page)) return true;
+      if (state.currentUser.role === "manager" && page === "measurements") return true;
       return (state.currentUser.permissions || []).includes(page);
     }
     function isSuperAdmin() {
@@ -257,7 +322,7 @@ const TOKEN_KEY = "pp_token_v1";
       return true;
     }
     function canEditProjects() {
-      return hasPerm("projects") && !isClientUser() && state.currentUser?.role !== "viewer";
+      return hasPerm("projects") && !isClientUser() && !["viewer", "designer", "worker"].includes(state.currentUser?.role);
     }
     function pageTitle(page) {
       return isClientUser() && CLIENT_PAGE_TITLES[page] ? CLIENT_PAGE_TITLES[page] : (PAGE_TITLES[page] || "Planet Print");
@@ -293,13 +358,18 @@ const TOKEN_KEY = "pp_token_v1";
       el.permGrid.innerHTML = ALL_PERMS.map((p) => `<label class="perm-item"><input type="checkbox" data-perm="${p}" checked /> ${PAGE_TITLES[p]}</label>`).join("");
     }
     function renderTabs() {
-      const base = ["dashboard", "projects", "workers", "founders", "expenses", "archive", "settings"];
-      const visible = base.filter(hasPerm);
+      const base = ["dashboard", "projects", "designs", "payments", "workers", "measurements", "founders", "expenses", "reports", "archive", "settings"];
+      const visible = base.filter((page) => page === "payments"
+        ? hasPerm("projects")
+        : page === "reports"
+          ? hasPerm("dashboard")
+          : page === "designs" ? hasPerm("designs") || canEditProjects() : hasPerm(page));
       if (!isClientUser() && !visible.includes("archive") && (isSuperAdmin() || hasPerm("dashboard") || hasPerm("projects") || hasPerm("expenses"))) visible.splice(Math.max(visible.length - 1, 0), 0, "archive");
       if (state.currentUser.role === "super_admin") visible.splice(visible.length - 1, 0, "users");
       el.tabs.innerHTML = visible.map((p, i) => `<button class="tab ${i === 0 ? "active" : ""}" data-page="${p}">${pageTitle(p)}</button>`).join("");
       el.pages.forEach((x) => x.classList.remove("active"));
       if (visible[0]) document.getElementById(visible[0]).classList.add("active");
+      el.appSection.dataset.page = visible[0] || "dashboard";
       if (el.pageHeading) el.pageHeading.textContent = pageTitle(visible[0]) || "Dashboard";
       Array.from(el.tabs.querySelectorAll(".tab")).forEach((btn) => {
         btn.addEventListener("click", () => {
@@ -308,6 +378,7 @@ const TOKEN_KEY = "pp_token_v1";
           btn.classList.add("active");
           el.pages.forEach((x) => x.classList.remove("active"));
           document.getElementById(page).classList.add("active");
+          el.appSection.dataset.page = page;
           if (el.pageHeading) el.pageHeading.textContent = pageTitle(page);
           setSidebar(false);
           drawCharts();
@@ -327,6 +398,7 @@ const TOKEN_KEY = "pp_token_v1";
       setSidebar(false);
       el.appSection.classList.toggle("is-limited", !isSuperAdmin());
       el.userBadge.textContent = `User: ${state.currentUser.username} (${state.currentUser.role})`;
+      el.measurementWorker.value = state.currentUser.username;
       el.timeBadge.textContent = new Date().toLocaleString("uz-UZ");
       el.welcomeLine.textContent = isClientUser() ? "Zakazlaringiz holati va topshirish muddati." : "Xush kelibsiz. Bu panel login orqali himoyalangan.";
       if (el.expenseReset) el.expenseReset.classList.toggle("hidden", !isSuperAdmin());
@@ -341,12 +413,20 @@ const TOKEN_KEY = "pp_token_v1";
         firstTab.classList.add("active");
       }
       if (el.pageHeading) el.pageHeading.textContent = pageTitle(firstPage);
+      el.appSection.dataset.page = firstPage;
     }
 
     function workerAdvanceById() {
       const map = {};
       state.finance.expenses.forEach((e) => {
         if (e.type === "oylik_avans" && e.workerId) map[e.workerId] = (map[e.workerId] || 0) + num(e.amount);
+      });
+      return map;
+    }
+    function workerSalaryPaidById() {
+      const map = {};
+      state.finance.expenses.forEach((e) => {
+        if (e.type === "oylik_tolov" && e.workerId) map[e.workerId] = (map[e.workerId] || 0) + num(e.amount);
       });
       return map;
     }
@@ -364,9 +444,11 @@ const TOKEN_KEY = "pp_token_v1";
       const receivable = state.finance.projects.reduce((a, p) => a + Math.max(num(p.amount) - num(p.advance), 0), 0);
 
       const workerAvMap = workerAdvanceById();
+      const workerPaidMap = workerSalaryPaidById();
       const salaryFundBase = state.finance.workers.reduce((a, w) => a + num(w.salary), 0);
       const workerAdvanceTotal = Object.values(workerAvMap).reduce((a, v) => a + v, 0);
-      const salaryPayableNow = Math.max(salaryFundBase - workerAdvanceTotal, 0);
+      const workerSalaryPaidTotal = Object.values(workerPaidMap).reduce((a, v) => a + v, 0);
+      const salaryPayableNow = Math.max(salaryFundBase - workerAdvanceTotal - workerSalaryPaidTotal, 0);
 
       const taxPercent = Math.min(Math.max(num(state.finance.settings.tax), 0), 100);
       const reservePercent = Math.min(Math.max(num(state.finance.settings.reserve), 0), 100);
@@ -398,7 +480,7 @@ const TOKEN_KEY = "pp_token_v1";
       const completedProjects = state.finance.projects.filter(p => liveStatus(p) === "Yakunlangan").length;
 
       return {
-        totalAmount, totalAdvance, receivable, salaryFundBase, workerAdvanceTotal, salaryPayableNow,
+        totalAmount, totalAdvance, receivable, salaryFundBase, workerAdvanceTotal, workerSalaryPaidTotal, salaryPayableNow,
         tax, reserve, manualOther, expenseByType, expensePaymentByType, explicitExpense, totalRealExpenses,
         founderPoolRaw, founderPool, founderShareTotal, founderRows, founderAdvanceTotal,
         overdueProjects, dueTodayProjects, completedProjects
@@ -431,6 +513,7 @@ const TOKEN_KEY = "pp_token_v1";
         { t: "Ta'sischi fondi", v: fmt(s.founderPool), meta: `Soliq ${fmt(s.tax)}, zaxira ${fmt(s.reserve)}, qo'lda ${fmt(s.manualOther)}`, cls: "profit-kpi" }
       ];
       el.kpiGrid.innerHTML = items.map(x => `<div class="kpi card ${x.cls}"><div><h3>${x.t}</h3><div class="v">${x.v}</div></div><div class="meta">${x.meta}</div></div>`).join("");
+      renderDashboardPeriod();
       el.formulaList.innerHTML = [
         `Loyiha summasi = ${fmt(s.totalAmount)}`,
         `Xarajatlar = Qo'lda (${fmt(s.manualOther)}) + Soliq (${fmt(s.tax)}) + Zaxira (${fmt(s.reserve)}) + Xarajat bo'limi (${fmt(s.explicitExpense)})`,
@@ -512,18 +595,133 @@ const TOKEN_KEY = "pp_token_v1";
         el.pName.value = p.name; el.pClient.value = p.client; el.pStart.value = p.startDate; el.pDue.value = p.dueDate;
         el.pClientLogin.value = p.clientLogin || "";
         el.pAmount.value = p.amount; el.pAdvance.value = p.advance; el.pType.value = p.paymentType; el.pStatus.value = p.status;
+        el.pAdvance.disabled = true;
         setFormEditMode(el.projectForm, el.projectSubmitBtn, el.projectCancelEdit, true);
       }));
     }
 
+    function renderWorkSelectors() {
+      const options = state.finance.projects.map(project =>
+        `<option value="${clean(project.id)}">${clean(project.name)} — ${clean(project.client)}</option>`
+      ).join("");
+      el.designProject.innerHTML = `<option value="">Zakazni tanlang</option>${options}`;
+      el.measurementProject.innerHTML = `<option value="">Zakazsiz</option>${options}`;
+      el.designForm.closest(".design-panel").classList.toggle("hidden", !hasPerm("designs") && !canEditProjects());
+      el.measurementForm.classList.toggle("hidden", !hasPerm("measurements") || ["viewer", "client"].includes(state.currentUser?.role));
+    }
+
+    function renderDesigns() {
+      if (!state.finance.designs.length) {
+        el.designsBody.innerHTML = `<tr><td colspan="5">Hozircha dizayn yuborilmagan.</td></tr>`;
+        return;
+      }
+      el.designsBody.innerHTML = [...state.finance.designs].reverse().map(design => `<tr>
+        <td>${clean(design.date || "-")}</td>
+        <td>${clean(design.projectName || "-")}</td>
+        <td>${clean(design.note || "-")}</td>
+        <td><span class="pill ${design.sent ? "s-done" : "s-due"}">${design.sent ? "Telegramga yuborilgan" : "Yuborilmagan"}</span></td>
+        <td><button class="ghost small-btn" type="button" data-open-photo="${clean(design.photoFileId)}">Rasm</button>
+        ${design.sent ? "" : `<button class="small-btn" type="button" data-send-design="${clean(design.id)}">Qayta yuborish</button>`}</td>
+      </tr>`).join("");
+    }
+
+    function renderMeasurements() {
+      if (!state.finance.measurements.length) {
+        el.measurementsBody.innerHTML = `<tr><td colspan="6">Hozircha joyga chiqish qayd etilmagan.</td></tr>`;
+        return;
+      }
+      el.measurementsBody.innerHTML = [...state.finance.measurements].reverse().map(visit => `<tr>
+        <td>${clean(visit.date)}</td>
+        <td>${clean(visit.client)}${visit.projectName ? `<div class="expense-order-detail">${clean(visit.projectName)}</div>` : ""}</td>
+        <td>${clean(visit.address)}</td>
+        <td>${clean(visit.workerName)}</td>
+        <td>${clean(visit.dimensions || "-")}</td>
+        <td><button class="ghost small-btn" type="button" data-open-photo="${clean(visit.photoFileId)}">Rasmni ko'rish</button></td>
+      </tr>`).join("");
+    }
+
+    function imageAsJpeg(file) {
+      return new Promise((resolve, reject) => {
+        if (!file || !file.type.startsWith("image/")) return reject(new Error("Rasm faylini tanlang."));
+        if (file.size > 15 * 1024 * 1024) return reject(new Error("Rasm 15 MB dan kichik bo'lishi kerak."));
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("Rasmni o'qib bo'lmadi."));
+        reader.onload = () => {
+          const image = new Image();
+          image.onerror = () => reject(new Error("Rasm faylini ochib bo'lmadi."));
+          image.onload = () => {
+            const scale = Math.min(1, 1600 / Math.max(image.width, image.height));
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(image.width * scale));
+            canvas.height = Math.max(1, Math.round(image.height * scale));
+            canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL("image/jpeg", 0.78));
+          };
+          image.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function uploadPhoto(kind, file) {
+      const image = await imageAsJpeg(file);
+      const result = await apiRequest("/api/telegram/upload-photo", {
+        method: "POST",
+        body: JSON.stringify({ kind, image })
+      });
+      return result.fileId;
+    }
+
+    async function showTelegramPhoto(fileId) {
+      const token = localStorage.getItem(TOKEN_KEY);
+      const response = await fetch(`/api/telegram/photo/${encodeURIComponent(fileId)}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || "Rasmni ochib bo'lmadi.");
+      }
+      const priorUrl = el.photoPreview.dataset.objectUrl;
+      if (priorUrl) URL.revokeObjectURL(priorUrl);
+      const url = URL.createObjectURL(await response.blob());
+      el.photoPreview.dataset.objectUrl = url;
+      el.photoPreview.src = url;
+      if (!el.photoDialog.open) el.photoDialog.showModal();
+    }
+
+    async function deliverDesign(design) {
+      if (!design?.approved) throw new Error("Tasdiqlanmagan dizaynni yuborib bo'lmaydi.");
+      const result = await apiRequest("/api/telegram/send-design", {
+        method: "POST",
+        body: JSON.stringify({
+          approved: true,
+          fileId: design.photoFileId,
+          caption: `Tasdiqlangan dizayn\nZakaz: ${design.projectName}\nMijoz: ${design.clientName}\n${design.note || ""}`.trim()
+        })
+      });
+      const index = state.finance.designs.findIndex(item => item.id === design.id);
+      if (index >= 0) {
+        state.finance.designs[index] = {
+          ...state.finance.designs[index],
+          sent: true,
+          telegramMessageId: result.messageId,
+          sentAt: new Date().toISOString()
+        };
+        if (!await saveFinance()) throw new Error("Telegramga yuborildi, lekin yuborilgan holatini bazaga saqlab bo'lmadi.");
+      }
+      renderDesigns();
+    }
+
     function renderWorkers() {
       const avMap = workerAdvanceById();
-      if (!state.finance.workers.length) { el.workersBody.innerHTML = `<tr><td colspan="6">Hozircha ishchi yo'q.</td></tr>`; return; }
+      const paidMap = workerSalaryPaidById();
+      if (!state.finance.workers.length) { el.workersBody.innerHTML = `<tr><td colspan="7">Hozircha ishchi yo'q.</td></tr>`; return; }
       el.workersBody.innerHTML = state.finance.workers.map((w) => {
         const av = avMap[w.id] || 0;
-        const remain = Math.max(num(w.salary) - av, 0);
+        const paid = paidMap[w.id] || 0;
+        const remain = Math.max(num(w.salary) - av - paid, 0);
         return `<tr>
-          <td>${clean(w.name)}</td><td>${clean(w.role)}</td><td>${fmt(w.salary)}</td><td>${fmt(av)}</td><td>${fmt(remain)}</td>
+          <td>${clean(w.name)}</td><td>${clean(w.role)}</td><td>${fmt(w.salary)}</td><td>${fmt(av)}</td><td>${fmt(paid)}</td><td>${fmt(remain)}</td>
           <td>
             <button class="ghost small-btn" type="button" data-edit-w="${w.id}">Tahrirlash</button>
             <button class="danger small-btn" type="button" data-del-w="${w.id}">O'chirish</button>
@@ -533,7 +731,6 @@ const TOKEN_KEY = "pp_token_v1";
       Array.from(el.workersBody.querySelectorAll("[data-del-w]")).forEach((b) => b.addEventListener("click", () => {
         const id = b.getAttribute("data-del-w");
         state.finance.workers = state.finance.workers.filter(w => w.id !== id);
-        state.finance.expenses = state.finance.expenses.filter(e => e.workerId !== id);
         saveFinance(); refreshAll();
       }));
       Array.from(el.workersBody.querySelectorAll("[data-edit-w]")).forEach((b) => b.addEventListener("click", () => {
@@ -570,7 +767,6 @@ const TOKEN_KEY = "pp_token_v1";
       Array.from(el.foundersBody.querySelectorAll("[data-del-f]")).forEach((b) => b.addEventListener("click", () => {
         const id = b.getAttribute("data-del-f");
         state.finance.founders = state.finance.founders.filter(f => f.id !== id);
-        state.finance.expenses = state.finance.expenses.filter(e => e.founderId !== id);
         saveFinance(); refreshAll();
       }));
       Array.from(el.foundersBody.querySelectorAll("[data-edit-f]")).forEach((b) => b.addEventListener("click", () => {
@@ -584,19 +780,72 @@ const TOKEN_KEY = "pp_token_v1";
     function fillExpenseRelatedSelects() {
       el.eWorkerId.innerHTML = state.finance.workers.map(w => `<option value="${w.id}">${clean(w.name)} (${clean(w.role)})</option>`).join("");
       el.eFounderId.innerHTML = state.finance.founders.map(f => `<option value="${f.id}">${clean(f.name)}</option>`).join("");
-      el.eProjectId.innerHTML = `<option value="">Umumiy xarajat (zakazga biriktirilmagan)</option>` +
-        state.finance.projects.map(p => `<option value="${clean(p.id)}">${clean(p.name)}${p.client ? ` — ${clean(p.client)}` : ""}</option>`).join("");
+      renderAllocationRows();
     }
     function toggleExpenseTypeInputs() {
       const t = el.eType.value;
-      el.eWorkerWrap.classList.toggle("hidden", t !== "oylik_avans");
+      el.eWorkerWrap.classList.toggle("hidden", t !== "oylik_avans" && t !== "oylik_tolov");
       el.eFounderWrap.classList.toggle("hidden", t !== "founder_avans");
-      el.eProjectId.required = t === "founder_avans";
     }
 
-    function projectNameForExpense(expense) {
-      const project = state.finance.projects.find(p => p.id === expense.sourceProjectId);
-      return project?.name || expense.sourceProjectName || "";
+    function expenseAllocations(expense) {
+      if (Array.isArray(expense.allocations) && expense.allocations.length) return expense.allocations;
+      if (expense.sourceProjectId) {
+        return [{ projectId: expense.sourceProjectId, projectName: expense.sourceProjectName || "", amount: num(expense.amount) }];
+      }
+      return [];
+    }
+
+    function allocationProjectOptions(selectedId = "") {
+      const options = state.finance.projects.map(project =>
+        `<option value="${clean(project.id)}" ${project.id === selectedId ? "selected" : ""}>${clean(project.name)}${project.client ? ` — ${clean(project.client)}` : ""}</option>`
+      );
+      if (selectedId && !state.finance.projects.some(project => project.id === selectedId)) {
+        const oldProject = state.finance.expenses.flatMap(expenseAllocations).find(allocation => allocation.projectId === selectedId);
+        options.unshift(`<option value="${clean(selectedId)}" selected>${clean(oldProject?.projectName || "O'chirilgan zakaz")} (faol emas)</option>`);
+      }
+      return `<option value="" ${selectedId ? "" : "selected"} disabled>Zakazni tanlang</option>` + options.join("");
+    }
+
+    function renderAllocationRows(allocations = null) {
+      if (!el.expenseAllocations) return;
+      const existingRows = allocations === null ? Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-row]")).map(row => ({
+        projectId: row.querySelector("[data-allocation-project]")?.value || "",
+        amount: row.querySelector("[data-allocation-amount]")?.value || ""
+      })) : allocations;
+      const rows = existingRows.length ? existingRows : [{ projectId: "", amount: "" }];
+      el.expenseAllocations.innerHTML = rows.map((allocation, index) => `
+        <div class="allocation-row" data-allocation-row>
+          <label class="allocation-select-label">Zakaz ${index + 1}<select data-allocation-project required>${allocationProjectOptions(allocation.projectId || "")}</select></label>
+          <label>Ajratilgan summa (UZS)<input data-allocation-amount inputmode="decimal" value="${clean(allocation.amount)}" required /></label>
+          <button class="danger small-btn" type="button" data-remove-allocation aria-label="Zakaz taqsimotini o'chirish">O'chirish</button>
+        </div>`).join("");
+      updateAllocationTotal();
+    }
+
+    function updateAllocationTotal() {
+      if (!el.allocationTotal || !el.expenseAllocations) return;
+      const assigned = Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-amount]"))
+        .reduce((total, input) => total + num(input.value), 0);
+      const amount = num(el.eAmount.value);
+      const matches = amount > 0 && Math.abs(assigned - amount) < 0.01;
+      el.allocationTotal.textContent = `Taqsimlangan: ${fmt(assigned)} / ${fmt(amount)}${matches ? " — to'liq" : " — qolgan summa taqsimlanmagan"}`;
+      el.allocationTotal.classList.toggle("is-valid", matches);
+      el.allocationTotal.classList.toggle("is-invalid", !matches);
+    }
+
+    function readExpenseAllocations() {
+      return Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-row]")).map(row => {
+        const projectId = row.querySelector("[data-allocation-project]").value;
+        const project = state.finance.projects.find(item => item.id === projectId);
+        const oldAllocation = state.finance.expenses.flatMap(expenseAllocations)
+          .find(allocation => allocation.projectId === projectId);
+        return {
+          projectId,
+          projectName: project?.name || oldAllocation?.projectName || "",
+          amount: num(row.querySelector("[data-allocation-amount]").value)
+        };
+      });
     }
 
     function founderAdvanceProjectDetails(founderId) {
@@ -604,11 +853,17 @@ const TOKEN_KEY = "pp_token_v1";
       state.finance.expenses
         .filter(e => e.type === "founder_avans" && e.founderId === founderId)
         .forEach(e => {
-          const projectKey = e.sourceProjectId || "unassigned";
-          const projectName = projectNameForExpense(e) || "Zakaz ko'rsatilmagan";
-          const current = grouped.get(projectKey) || { name: projectName, amount: 0 };
-          current.amount += num(e.amount);
-          grouped.set(projectKey, current);
+          const allocations = expenseAllocations(e);
+          if (!allocations.length) {
+            const current = grouped.get("unassigned") || { name: "Zakaz biriktirilmagan", amount: 0 };
+            current.amount += num(e.amount);
+            grouped.set("unassigned", current);
+          }
+          allocations.forEach(allocation => {
+            const current = grouped.get(allocation.projectId) || { name: allocation.projectName, amount: 0 };
+            current.amount += num(allocation.amount);
+            grouped.set(allocation.projectId, current);
+          });
         });
       if (!grouped.size) return "Hozircha avans olinmagan";
       return Array.from(grouped.values(), item => `${clean(item.name)}: ${fmt(item.amount)}`).join("<br>");
@@ -625,23 +880,27 @@ const TOKEN_KEY = "pp_token_v1";
       const unassigned = { expenses: 0, founderAdvances: new Map() };
 
       state.finance.expenses.forEach(expense => {
-        let totals = projectTotals.get(expense.sourceProjectId);
-        if (!totals && expense.sourceProjectId) {
-          totals = {
-            project: null,
-            projectName: expense.sourceProjectName || "O'chirilgan zakaz",
-            expenses: 0,
-            founderAdvances: new Map()
-          };
-          projectTotals.set(expense.sourceProjectId, totals);
-        }
-        totals = totals || unassigned;
-        if (expense.type === "founder_avans") {
-          const founderKey = expense.founderId || "unknown";
-          totals.founderAdvances.set(founderKey, (totals.founderAdvances.get(founderKey) || 0) + num(expense.amount));
-        } else {
-          totals.expenses += num(expense.amount);
-        }
+        const allocations = expenseAllocations(expense);
+        if (!allocations.length) unassigned.expenses += num(expense.amount);
+        allocations.forEach(allocation => {
+          let totals = projectTotals.get(allocation.projectId);
+          if (!totals && allocation.projectId) {
+            totals = {
+              project: null,
+              projectName: allocation.projectName || "O'chirilgan zakaz",
+              expenses: 0,
+              founderAdvances: new Map()
+            };
+            projectTotals.set(allocation.projectId, totals);
+          }
+          totals = totals || unassigned;
+          if (expense.type === "founder_avans") {
+            const founderKey = expense.founderId || "unknown";
+            totals.founderAdvances.set(founderKey, (totals.founderAdvances.get(founderKey) || 0) + num(allocation.amount));
+          } else {
+            totals.expenses += num(allocation.amount);
+          }
+        });
       });
 
       const rows = Array.from(projectTotals.values()).map(({ project, projectName, expenses, founderAdvances }) => {
@@ -681,13 +940,16 @@ const TOKEN_KEY = "pp_token_v1";
         return;
       }
       el.expensesBody.innerHTML = state.finance.expenses.map((e) => {
-        const worker = e.workerId ? state.finance.workers.find(w => w.id === e.workerId)?.name : "";
-        const founder = e.founderId ? state.finance.founders.find(f => f.id === e.founderId)?.name : "";
+        const worker = e.workerId ? state.finance.workers.find(w => w.id === e.workerId)?.name || e.workerName : "";
+        const founder = e.founderId ? state.finance.founders.find(f => f.id === e.founderId)?.name || e.founderName : "";
         const target = worker || founder || "-";
-        const sourceProject = projectNameForExpense(e) || "Umumiy / zakaz ko'rsatilmagan";
+        const allocations = expenseAllocations(e);
+        const sourceProject = allocations.length
+          ? allocations.map(allocation => `${clean(allocation.projectName || state.finance.projects.find(project => project.id === allocation.projectId)?.name || "Zakaz")} (${fmt(allocation.amount)})`).join("<br>")
+          : "Zakaz biriktirilmagan (eski yozuv)";
         const paymentType = EXPENSE_PAYMENT_LABEL[e.paymentType] || (e.paymentType ? clean(e.paymentType) : "Ko'rsatilmagan");
         return `<tr>
-          <td>${clean(e.date)}</td><td>${EXPENSE_LABEL[e.type] || clean(e.type)}</td><td>${fmt(e.amount)}</td><td>${paymentType}</td><td>${clean(target)}</td><td>${clean(sourceProject)}</td><td>${clean(e.note || "-")}</td>
+          <td>${clean(e.date)}</td><td>${EXPENSE_LABEL[e.type] || clean(e.type)}</td><td>${fmt(e.amount)}</td><td>${paymentType}</td><td>${clean(target)}</td><td>${sourceProject}</td><td>${clean(e.note || "-")}</td>
           <td>
             <button class="ghost small-btn" type="button" data-edit-e="${e.id}">Tahrirlash</button>
             <button class="danger small-btn" type="button" data-del-e="${e.id}">O'chirish</button>
@@ -702,19 +964,48 @@ const TOKEN_KEY = "pp_token_v1";
         const e = state.finance.expenses.find(x => x.id === b.getAttribute("data-edit-e")); if (!e) return;
         editState.expenseId = e.id;
         el.eDate.value = e.date; el.eType.value = e.type; el.eAmount.value = e.amount; el.ePaymentType.value = e.paymentType || "naqd"; el.eNote.value = e.note || "";
-        fillExpenseRelatedSelects(); toggleExpenseTypeInputs();
+        fillExpenseRelatedSelects(); renderAllocationRows(expenseAllocations(e)); toggleExpenseTypeInputs();
         if (e.workerId) el.eWorkerId.value = e.workerId;
         if (e.founderId) el.eFounderId.value = e.founderId;
-        if (e.sourceProjectId && !Array.from(el.eProjectId.options).some(option => option.value === e.sourceProjectId)) {
-          const oldProject = document.createElement("option");
-          oldProject.value = clean(e.sourceProjectId);
-          oldProject.textContent = `${clean(e.sourceProjectName || "O'chirilgan zakaz")} (faol emas)`;
-          el.eProjectId.appendChild(oldProject);
-        }
-        el.eProjectId.value = e.sourceProjectId || "";
         setFormEditMode(el.expenseForm, el.expenseSubmitBtn, el.expenseCancelEdit, true);
       }));
       renderOrderExpenseSummary();
+    }
+
+    function fillPaymentProjectSelect() {
+      if (!el.paymentProjectId) return;
+      el.paymentProjectId.innerHTML = state.finance.projects.map(project => {
+        const due = Math.max(num(project.amount) - num(project.advance), 0);
+        return `<option value="${clean(project.id)}">${clean(project.name)} — qolgan ${fmt(due)}</option>`;
+      }).join("");
+    }
+
+    function renderPayments() {
+      if (!el.paymentsBody) return;
+      const payments = [...state.finance.payments].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+      if (!payments.length) {
+        el.paymentsBody.innerHTML = `<tr><td colspan="7">Hozircha to'lov yo'q.</td></tr>`;
+        return;
+      }
+      el.paymentsBody.innerHTML = payments.map(payment => {
+        const project = state.finance.projects.find(item => item.id === payment.projectId);
+        return `<tr>
+          <td>${clean(payment.date || "-")}</td><td>${clean(project?.name || payment.projectName || "Zakaz arxivlangan")}</td>
+          <td>${clean(project?.client || payment.clientName || "-")}</td><td>${fmt(payment.amount)}</td>
+          <td>${clean(payment.paymentType || "-")}</td><td>${clean(payment.note || "-")}</td>
+          <td><button class="danger small-btn" type="button" data-delete-payment="${clean(payment.id)}">O'chirish</button></td>
+        </tr>`;
+      }).join("");
+      Array.from(el.paymentsBody.querySelectorAll("[data-delete-payment]")).forEach(button => button.addEventListener("click", async () => {
+        const payment = state.finance.payments.find(item => item.id === button.getAttribute("data-delete-payment"));
+        if (!payment) return;
+        const project = state.finance.projects.find(item => item.id === payment.projectId);
+        if (project) project.advance = Math.max(num(project.advance) - num(payment.amount), 0);
+        state.finance.payments = state.finance.payments.filter(item => item.id !== payment.id);
+        const saved = await saveFinance();
+        if (!saved) return msg(el.paymentMsg, "To'lovni o'chirishda saqlash xatosi yuz berdi.", "err");
+        refreshAll();
+      }));
     }
 
     function archiveDebt(project) {
@@ -725,8 +1016,17 @@ const TOKEN_KEY = "pp_token_v1";
       if (!el.archiveBody) return;
       const archives = state.finance.archives || [];
       const projectCount = archives.reduce((a, archive) => a + (Array.isArray(archive.projects) ? archive.projects.length : 0), 0);
-      const openDebt = archives.reduce((sum, archive) => {
-        return sum + (Array.isArray(archive.projects) ? archive.projects.reduce((a, p) => a + (p.debtClosed ? 0 : archiveDebt(p)), 0) : 0);
+      const latestArchivedProjects = new Map();
+      archives.forEach(archive => (archive.projects || []).forEach(project => {
+        const previous = latestArchivedProjects.get(project.id);
+        if (!previous || String(archive.month).localeCompare(String(previous.month)) > 0) {
+          latestArchivedProjects.set(project.id, { month: archive.month, project });
+        }
+      }));
+      state.finance.projects.forEach(project => latestArchivedProjects.set(project.id, { month: "9999-99", project }));
+      const openDebt = Array.from(latestArchivedProjects.values()).reduce((sum, item) => {
+        const project = item.project;
+        return sum + (project.debtClosed ? 0 : num(project.outstandingBalance ?? archiveDebt(project)));
       }, 0);
       if (el.archiveSummary) {
         el.archiveSummary.textContent = `Arxiv davrlari: ${archives.length}. Loyiha: ${projectCount}. Yopilmagan qarz: ${fmt(openDebt)}.`;
@@ -740,11 +1040,14 @@ const TOKEN_KEY = "pp_token_v1";
       archives.forEach((archive) => {
         const projects = Array.isArray(archive.projects) ? archive.projects : [];
         const expenses = Array.isArray(archive.expenses) ? archive.expenses : [];
+        const payments = Array.isArray(archive.payments) ? archive.payments : [];
+        const measurements = Array.isArray(archive.measurements) ? archive.measurements : [];
+        const designs = Array.isArray(archive.designs) ? archive.designs : [];
         if (!projects.length) {
           rows.push(`<tr><td>${clean(archive.month)}</td><td colspan="7">Loyiha yo'q. Xarajatlar: ${expenses.length} ta.</td></tr>`);
         }
         projects.forEach((p) => {
-          const debt = archiveDebt(p);
+          const debt = num(p.outstandingBalance ?? archiveDebt(p));
           const closed = p.debtClosed || debt <= 0;
           rows.push(`<tr>
             <td>${clean(archive.month)}</td>
@@ -757,7 +1060,17 @@ const TOKEN_KEY = "pp_token_v1";
             <td>${isSuperAdmin() && !closed ? `<button class="ghost small-btn" type="button" data-close-debt="${archive.id}|${p.id}">Qarz yopildi</button>` : "-"}</td>
           </tr>`);
         });
-        rows.push(`<tr class="archive-expense-row"><td>${clean(archive.month)}</td><td colspan="7">Arxivlangan xarajatlar: ${expenses.length} ta, jami ${fmt(expenses.reduce((a, e) => a + num(e.amount), 0))}</td></tr>`);
+        const workers = Array.isArray(archive.workers) ? archive.workers.length : 0;
+        const founders = Array.isArray(archive.founders) ? archive.founders.length : 0;
+        rows.push(`<tr class="archive-expense-row"><td>${clean(archive.month)}</td><td colspan="7">Arxiv: ${payments.length} ta tushum (${fmt(payments.reduce((sum, p) => sum + num(p.amount), 0))}), ${expenses.length} ta xarajat (${fmt(expenses.reduce((sum, e) => sum + num(e.amount), 0))}), ${workers} ishchi, ${founders} ta'sischi, ${measurements.length} o'lchov, ${designs.length} dizayn.</td></tr>`);
+        measurements.forEach(visit => rows.push(`<tr>
+          <td>${clean(archive.month)}</td><td colspan="6">O'lchov: ${clean(visit.client)} — ${clean(visit.address)}; xodim: ${clean(visit.workerName)}; ${clean(visit.dimensions || "o'lcham kiritilmagan")}</td>
+          <td><button class="ghost small-btn" type="button" data-open-photo="${clean(visit.photoFileId)}">Rasm</button></td>
+        </tr>`));
+        designs.forEach(design => rows.push(`<tr>
+          <td>${clean(archive.month)}</td><td colspan="6">Dizayn: ${clean(design.projectName)} — ${clean(design.note || "izohsiz")}; ${design.sent ? "Telegramga yuborilgan" : "yuborilmagan"}</td>
+          <td><button class="ghost small-btn" type="button" data-open-photo="${clean(design.photoFileId)}">Rasm</button></td>
+        </tr>`));
       });
 
       el.archiveBody.innerHTML = rows.join("");
@@ -773,21 +1086,257 @@ const TOKEN_KEY = "pp_token_v1";
         const ok = await saveFinance();
         if (ok) refreshAll();
       }));
+      Array.from(el.archiveBody.querySelectorAll("[data-open-photo]")).forEach((btn) => btn.addEventListener("click", async () => {
+        try { await showTelegramPhoto(btn.dataset.openPhoto); }
+        catch (err) {
+          if (el.archiveSummary) el.archiveSummary.textContent = err.message || "Rasmni ochib bo'lmadi.";
+        }
+      }));
     }
 
     function renderPaymentLock() {
       if (!el.paymentLock) return;
       const locked = isPaymentLocked();
-      el.paymentLock.classList.toggle("hidden", !locked);
-      el.appSection.classList.toggle("payment-is-locked", locked && !isSuperAdmin());
-      if (!locked) {
+      const reminder = !!state.finance.payment?.reminder;
+      const visible = reminder || locked;
+      const blocking = locked && !isSuperAdmin();
+      el.paymentLock.classList.toggle("hidden", !visible);
+      el.paymentLock.classList.toggle("is-reminder", visible && !locked);
+      el.paymentLock.classList.toggle("super-admin-view", isSuperAdmin());
+      el.appSection.classList.toggle("payment-is-locked", blocking);
+      el.sidebar.inert = blocking;
+      el.appSection.querySelector(".main-area").inert = blocking;
+      el.paymentLock.setAttribute("role", blocking ? "dialog" : "region");
+      el.paymentLock.setAttribute("aria-modal", String(blocking));
+      if (!visible) {
         msg(el.paymentLockMsg, "", "");
         return;
       }
       const month = clean(state.finance.payment?.currentMonth || "");
       el.paymentLockTitle.textContent = "To'lov sanasi";
-      el.paymentLockText.textContent = `${month ? month + " oyi uchun " : ""}5-sana to'lov kuni. Super admin to'lov qilindi deb belgilamaguncha tizim yopiq.`;
+      el.paymentLockText.textContent = locked
+        ? isSuperAdmin()
+          ? `${month ? month + " oyi uchun " : ""}5-sana to'lov muddati o'tdi. To'lov tasdiqlanmaguncha adminlar uchun tizim yopiq; siz super admin sifatida ishlashda davom etasiz.`
+          : `${month ? month + " oyi uchun " : ""}5-sana to'lov kuni. Super admin to'lov qilindi deb belgilamaguncha tizim yopiq.`
+        : `${month ? month + " oyi uchun " : ""}to'lovni 5-sanagacha amalga oshiring. To'lov tasdiqlanmaguncha eslatma ko'rinadi.`;
       el.markPaidBtn.classList.toggle("hidden", !isSuperAdmin());
+    }
+
+    function ledgerRows() {
+      const rows = [];
+      (state.finance.archives || []).forEach(archive => {
+        const fallbackMonth = String(archive.month || "");
+        (archive.payments || []).forEach(payment => rows.push({ kind: "income", record: payment, fallbackMonth, archived: true }));
+        (archive.expenses || []).forEach(expense => rows.push({ kind: "expense", record: expense, fallbackMonth, archived: true }));
+      });
+      state.finance.payments.forEach(payment => rows.push({ kind: "income", record: payment, fallbackMonth: "", archived: false }));
+      state.finance.expenses.forEach(expense => rows.push({ kind: "expense", record: expense, fallbackMonth: "", archived: false }));
+      return rows.map(row => ({
+        ...row,
+        month: /^\d{4}-\d{2}/.test(String(row.record.date || ""))
+          ? String(row.record.date).slice(0, 7)
+          : row.fallbackMonth
+      }));
+    }
+
+    function ensureReportPeriods() {
+      const currentYear = String(new Date().getFullYear());
+      const currentMonth = String(new Date().getMonth() + 1).padStart(2, "0");
+      const years = new Set([currentYear]);
+      ledgerRows().forEach(row => {
+        if (/^\d{4}-\d{2}$/.test(row.month)) years.add(row.month.slice(0, 4));
+      });
+      const yearOptions = Array.from(years).sort((a, b) => b.localeCompare(a))
+        .map(year => `<option value="${year}">${year}</option>`).join("");
+      [el.dashboardYear, el.reportYear].forEach(select => {
+        if (!select) return;
+        const selected = select.value;
+        select.innerHTML = yearOptions;
+        select.value = years.has(selected) ? selected : currentYear;
+      });
+      if (el.dashboardMonth) {
+        const selected = el.dashboardMonth.value;
+        el.dashboardMonth.innerHTML = `<option value="all">Yil bo'yicha</option>` +
+          MONTH_LABELS.map((month, index) => `<option value="${String(index + 1).padStart(2, "0")}">${month}</option>`).join("");
+        el.dashboardMonth.value = selected ? selected : currentMonth;
+      }
+      if (el.reportMonth) {
+        const selected = el.reportMonth.value || "all";
+        el.reportMonth.innerHTML = `<option value="all">Yil bo'yicha</option>` +
+          MONTH_LABELS.map((month, index) => `<option value="${String(index + 1).padStart(2, "0")}">${month}</option>`).join("");
+        el.reportMonth.value = selected;
+      }
+    }
+
+    function monthsForYear(year) {
+      const totals = Array.from({ length: 12 }, (_, index) => ({
+        month: `${year}-${String(index + 1).padStart(2, "0")}`,
+        label: MONTH_LABELS[index],
+        income: 0,
+        expenses: 0,
+        paymentCount: 0,
+        expenseCount: 0
+      }));
+      ledgerRows().forEach(row => {
+        if (!row.month || row.month.slice(0, 4) !== String(year)) return;
+        const monthIndex = Number(row.month.slice(5, 7)) - 1;
+        if (monthIndex < 0 || monthIndex > 11) return;
+        const target = totals[monthIndex];
+        if (row.kind === "income") {
+          target.income += num(row.record.amount);
+          target.paymentCount++;
+        } else {
+          target.expenses += num(row.record.amount);
+          target.expenseCount++;
+        }
+      });
+      return totals;
+    }
+
+    function selectedPeriodTotals(year, month) {
+      return monthsForYear(year)
+        .filter(row => month === "all" || row.month.endsWith(`-${month}`))
+        .reduce((total, row) => ({
+          income: total.income + row.income,
+          expenses: total.expenses + row.expenses,
+          paymentCount: total.paymentCount + row.paymentCount,
+          expenseCount: total.expenseCount + row.expenseCount
+        }), { income: 0, expenses: 0, paymentCount: 0, expenseCount: 0 });
+    }
+
+    function drawCompareChart(canvas, legend, rows) {
+      if (!canvas || !legend) return;
+      fitCanvas(canvas);
+      const ctx = canvas.getContext("2d");
+      const width = canvas.width, height = canvas.height;
+      ctx.clearRect(0, 0, width, height);
+      const max = Math.max(1, ...rows.flatMap(row => [row.income, row.expenses]));
+      const scale = max >= 1000000 ? 1000000 : max >= 1000 ? 1000 : 1;
+      const suffix = scale === 1000000 ? "m" : scale === 1000 ? "k" : "";
+      const left = 56, right = 16, top = 18, bottom = 40;
+      const chartWidth = width - left - right, chartHeight = height - top - bottom;
+      const groupWidth = chartWidth / Math.max(rows.length, 1);
+      const barWidth = Math.min(24, groupWidth * 0.28);
+      ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue("--line").trim() || "#d9e1ec";
+      ctx.fillStyle = getComputedStyle(document.body).getPropertyValue("--muted").trim() || "#64748b";
+      ctx.font = "11px Segoe UI";
+      ctx.textAlign = "right";
+      for (let tick = 0; tick <= 4; tick++) {
+        const y = top + chartHeight - chartHeight * tick / 4;
+        ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(width - right, y); ctx.stroke();
+        const tickValue = max * tick / 4 / scale;
+        ctx.fillText(`${scale === 1 ? Math.round(tickValue) : tickValue.toFixed(1)}${suffix}`, left - 7, y + 4);
+      }
+      rows.forEach((row, index) => {
+        const center = left + groupWidth * (index + 0.5);
+        const incomeHeight = row.income / max * chartHeight;
+        const expenseHeight = row.expenses / max * chartHeight;
+        ctx.fillStyle = "#0875d1";
+        ctx.fillRect(center - barWidth - 2, top + chartHeight - incomeHeight, barWidth, incomeHeight);
+        ctx.fillStyle = "#e63946";
+        ctx.fillRect(center + 2, top + chartHeight - expenseHeight, barWidth, expenseHeight);
+        ctx.fillStyle = getComputedStyle(document.body).getPropertyValue("--muted").trim() || "#64748b";
+        ctx.textAlign = "center";
+        ctx.fillText(row.label.slice(0, 3), center, height - 14);
+      });
+      legend.innerHTML = `<span><i class="dot" style="background:#0875d1"></i>Daromad</span><span><i class="dot" style="background:#e63946"></i>Xarajat</span>`;
+    }
+
+    function renderDashboardPeriod() {
+      if (!el.dashboardYear || !el.dashboardMonth) return;
+      const year = el.dashboardYear.value;
+      const month = el.dashboardMonth.value;
+      const totals = selectedPeriodTotals(year, month);
+      const monthlyRows = monthsForYear(year).filter(row => month === "all" || row.month.endsWith(`-${month}`));
+      const periodName = month === "all" ? `${year}-yil` : `${MONTH_LABELS[Number(month) - 1]} ${year}`;
+      const net = totals.income - totals.expenses;
+      const projectCount = state.finance.projects.length;
+      const unpaid = state.finance.projects.reduce((sum, project) => sum + Math.max(num(project.amount) - num(project.advance), 0), 0);
+      const completed = state.finance.projects.filter(project => project.status === "Yakunlangan").length;
+      const active = Math.max(projectCount - completed, 0);
+      el.kpiGrid.innerHTML = [
+        { title: "Daromad", value: fmt(totals.income), meta: periodName, cls: "income" },
+        { title: "Xarajat", value: fmt(totals.expenses), meta: periodName, cls: "warn-kpi" },
+        { title: "Sof foyda", value: fmt(net), meta: periodName, cls: net < 0 ? "danger-kpi" : "profit-kpi" },
+        { title: "Faol loyihalar", value: active, meta: `${projectCount} ta joriy loyiha`, cls: "income" },
+        { title: "Tugallangan", value: completed, meta: "Joriy loyihalar", cls: "cash" },
+        { title: "Qarzdorlik", value: fmt(unpaid), meta: "Yig'ilishi kerak", cls: "danger-kpi" }
+      ].map(item => `<div class="kpi card ${item.cls}"><div><h3>${item.title}</h3><div class="v">${item.value}</div></div><div class="meta">${item.meta}</div></div>`).join("");
+      el.dashboardChartCaption.textContent = `${periodName} uchun daromad va xarajatlar`;
+      el.projectStatusSummary.innerHTML = `
+        <div class="status-stat"><span>Faol</span><strong>${active}</strong></div>
+        <div class="status-stat"><span>Tugallangan</span><strong>${completed}</strong></div>
+        <div class="status-stat"><span>Ochiq qarzdorlik</span><strong>${fmt(unpaid)}</strong></div>
+        <div class="status-stat"><span>Davr to'lovlari</span><strong>${totals.paymentCount}</strong></div>`;
+      drawCompareChart(el.financeTrendChart, el.financeTrendLegend, monthlyRows);
+    }
+
+    function renderReports() {
+      if (!el.reportYear || !el.reportMonth) return;
+      const year = el.reportYear.value;
+      const month = el.reportMonth.value;
+      const months = monthsForYear(year);
+      const totals = selectedPeriodTotals(year, month);
+      const periodName = month === "all" ? `${year}-yil` : `${MONTH_LABELS[Number(month) - 1]} ${year}`;
+      const net = totals.income - totals.expenses;
+      const margin = totals.income ? net / totals.income * 100 : 0;
+      el.reportKpis.innerHTML = [
+        { title: "Umumiy daromad", value: fmt(totals.income), meta: periodName, cls: "income" },
+        { title: "Umumiy xarajat", value: fmt(totals.expenses), meta: periodName, cls: "warn-kpi" },
+        { title: "Sof foyda", value: fmt(net), meta: periodName, cls: net < 0 ? "danger-kpi" : "profit-kpi" },
+        { title: "Foyda marjasi", value: `${margin.toFixed(1)}%`, meta: `${totals.paymentCount} ta tushum`, cls: "cash" }
+      ].map(item => `<div class="kpi card ${item.cls}"><div><h3>${item.title}</h3><div class="v">${item.value}</div></div><div class="meta">${item.meta}</div></div>`).join("");
+      el.reportMonthsBody.innerHTML = months
+        .filter(row => month === "all" || row.month.endsWith(`-${month}`))
+        .map(row => `<tr><td>${row.label}</td><td>${fmt(row.income)}</td><td>${fmt(row.expenses)}</td><td>${fmt(row.income - row.expenses)}</td><td>${row.paymentCount}</td><td>${row.expenseCount}</td></tr>`)
+        .join("") || `<tr><td colspan="6">Tanlangan davrda yozuv yo'q.</td></tr>`;
+      drawCompareChart(el.reportTrendChart, el.reportTrendLegend, months);
+    }
+
+    function csvCell(value) {
+      let text = String(value ?? "");
+      if (/^[=+\-@]/.test(text)) text = "'" + text;
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+
+    function exportReportCsv() {
+      const year = el.reportYear.value;
+      const month = el.reportMonth.value;
+      const lines = [[
+        "Sana", "Oy", "Tur", "Zakaz", "Mijoz / oluvchi", "Kategoriya", "Summa (UZS)", "To'lov turi", "Izoh", "Arxiv"
+      ]];
+      ledgerRows()
+        .filter(row => row.month.startsWith(`${year}-`) && (month === "all" || row.month.endsWith(`-${month}`)))
+        .sort((a, b) => String(a.record.date || a.month).localeCompare(String(b.record.date || b.month)))
+        .forEach(row => {
+          const record = row.record;
+          if (row.kind === "income") {
+            const project = state.finance.projects.find(item => item.id === record.projectId);
+            lines.push([
+              record.date || row.month, row.month, "Daromad", project?.name || record.projectName || "Zakaz arxivda",
+              project?.client || record.clientName || "", "Mijoz to'lovi", num(record.amount), record.paymentType || "", record.note || "", row.archived ? "Ha" : "Yo'q"
+            ]);
+          } else {
+            const allocations = expenseAllocations(record);
+            const projectLabel = allocations.length
+              ? allocations.map(allocation => `${allocation.projectName || state.finance.projects.find(project => project.id === allocation.projectId)?.name || "Zakaz"} (${num(allocation.amount)})`).join("; ")
+              : "Eski yozuv: zakaz biriktirilmagan";
+            const worker = state.finance.workers.find(item => item.id === record.workerId)?.name || record.workerName || "";
+            const founder = state.finance.founders.find(item => item.id === record.founderId)?.name || record.founderName || "";
+            lines.push([
+              record.date || row.month, row.month, "Xarajat", projectLabel, worker || founder,
+              EXPENSE_LABEL[record.type] || record.type, num(record.amount), EXPENSE_PAYMENT_LABEL[record.paymentType] || record.paymentType || "",
+              record.note || "", row.archived ? "Ha" : "Yo'q"
+            ]);
+          }
+        });
+      const csv = "\uFEFF" + lines.map(line => line.map(csvCell).join(",")).join("\r\n");
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `planet-print-hisobot-${year}${month === "all" ? "" : "-" + month}.csv`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
     function drawDonut(canvas, legendNode, items) {
@@ -822,7 +1371,9 @@ const TOKEN_KEY = "pp_token_v1";
         const x = left + (i + 0.5) * (cw / items.length) - bw / 2, bh = (it.value / max) * ch, y = top + ch - bh;
         ctx.fillStyle = it.color; ctx.fillRect(x, y, bw, bh);
         ctx.fillStyle = "#1f4334"; ctx.font = "10px Segoe UI"; ctx.textAlign = "center";
-        const t = money ? (it.value / 1000000).toFixed(1) + "m" : String(it.value);
+        const scale = it.value >= 1000000 ? 1000000 : it.value >= 1000 ? 1000 : 1;
+        const suffix = scale === 1000000 ? "m" : scale === 1000 ? "k" : "";
+        const t = money ? `${scale === 1 ? Math.round(it.value) : (it.value / scale).toFixed(1)}${suffix}` : String(it.value);
         ctx.fillText(t, x + bw / 2, y - 4); ctx.fillStyle = "#355848"; ctx.fillText(it.label, x + bw / 2, top + ch + 15);
       });
       legendNode.innerHTML = items.map((it) => `<span><i class="dot" style="background:${it.color}"></i>${it.label}: ${money ? fmt(it.value) : it.value}</span>`).join("");
@@ -885,13 +1436,20 @@ const TOKEN_KEY = "pp_token_v1";
 
     function refreshAll() {
       fillExpenseRelatedSelects();
+      fillPaymentProjectSelect();
+      renderWorkSelectors();
+      ensureReportPeriods();
       renderSummary();
       renderProjectAlerts();
       renderProjects();
+      renderDesigns();
+      renderMeasurements();
       renderWorkers();
       renderFounders();
       renderExpenses();
+      renderPayments();
       renderArchives();
+      renderReports();
       renderUsersTable();
       renderPaymentLock();
       drawCharts();
@@ -903,6 +1461,7 @@ const TOKEN_KEY = "pp_token_v1";
     function resetProjectForm() {
       editState.projectId = null;
       el.projectForm.reset();
+      el.pAdvance.disabled = false;
       setFormEditMode(el.projectForm, el.projectSubmitBtn, el.projectCancelEdit, false);
       msg(el.projectMsg, "", "");
     }
@@ -923,6 +1482,7 @@ const TOKEN_KEY = "pp_token_v1";
       el.expenseForm.reset();
       el.eDate.value = today();
       toggleExpenseTypeInputs();
+      renderAllocationRows([]);
       setFormEditMode(el.expenseForm, el.expenseSubmitBtn, el.expenseCancelEdit, false);
       msg(el.expenseMsg, "", "");
     }
@@ -1025,7 +1585,157 @@ const TOKEN_KEY = "pp_token_v1";
         if (event.key === "Escape") setSidebar(false);
       });
       el.themeBtn.addEventListener("click", () => { setTheme((localStorage.getItem(THEME_KEY) || "light") === "light" ? "dark" : "light"); });
+      el.designsBody.addEventListener("click", async (event) => {
+        const photoButton = event.target.closest("[data-open-photo]");
+        if (photoButton) {
+          try { await showTelegramPhoto(photoButton.dataset.openPhoto); }
+          catch (err) { msg(el.designMsg, err.message, "err"); }
+          return;
+        }
+        const sendButton = event.target.closest("[data-send-design]");
+        if (!sendButton) return;
+        const design = state.finance.designs.find(item => item.id === sendButton.dataset.sendDesign);
+        try {
+          sendButton.disabled = true;
+          await deliverDesign(design);
+          msg(el.designMsg, "Dizayn montajchilar guruhiga yuborildi.", "ok");
+        } catch (err) {
+          msg(el.designMsg, err.message || "Dizayn yuborilmadi.", "err");
+        } finally {
+          sendButton.disabled = false;
+        }
+      });
+      el.measurementsBody.addEventListener("click", async (event) => {
+        const photoButton = event.target.closest("[data-open-photo]");
+        if (!photoButton) return;
+        try { await showTelegramPhoto(photoButton.dataset.openPhoto); }
+        catch (err) { msg(el.measurementMsg, err.message, "err"); }
+      });
+      el.photoDialog.addEventListener("close", () => {
+        const url = el.photoPreview.dataset.objectUrl;
+        if (url) URL.revokeObjectURL(url);
+        delete el.photoPreview.dataset.objectUrl;
+        el.photoPreview.removeAttribute("src");
+      });
+      el.designForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (blockIfPaymentLocked(el.designMsg)) return;
+        if (!el.designApproved.checked) return msg(el.designMsg, "Avval mijoz tasdig'ini belgilang.", "err");
+        const project = state.finance.projects.find(item => item.id === el.designProject.value);
+        if (!project) return msg(el.designMsg, "Zakazni tanlang.", "err");
+        const file = el.designImage.files?.[0];
+        if (!file) return msg(el.designMsg, "Dizayn rasmini tanlang.", "err");
+        el.designSubmitBtn.disabled = true;
+        msg(el.designMsg, "Dizayn yuklanmoqda...", "warn");
+        try {
+          const photoFileId = await uploadPhoto("design", file);
+          const design = {
+            id: uid(),
+            date: today(),
+            projectId: project.id,
+            projectName: project.name,
+            clientName: project.client,
+            note: clean(el.designNote.value),
+            photoFileId,
+            approved: true,
+            approvedAt: new Date().toISOString(),
+            approvedBy: state.currentUser.username,
+            sent: false
+          };
+          state.finance.designs.push(design);
+          if (!await saveFinance()) {
+            state.finance.designs = state.finance.designs.filter(item => item.id !== design.id);
+            throw new Error("Dizayn yuklandi, ammo platformaga saqlab bo'lmadi. Qayta urinib ko'ring.");
+          }
+          renderDesigns();
+          await deliverDesign(design);
+          el.designForm.reset();
+          msg(el.designMsg, "Tasdiqlangan dizayn Telegramdagi montajchilar guruhiga yuborildi.", "ok");
+        } catch (err) {
+          msg(el.designMsg, err.message || "Dizaynni yuborishda xatolik.", "err");
+        } finally {
+          el.designSubmitBtn.disabled = false;
+        }
+      });
+      el.measurementForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (blockIfPaymentLocked(el.measurementMsg)) return;
+        const project = state.finance.projects.find(item => item.id === el.measurementProject.value);
+        const file = el.measurementPhoto.files?.[0];
+        if (!file) return msg(el.measurementMsg, "Joyga borganingizni tasdiqlash uchun rasm yuklang.", "err");
+        el.measurementSubmitBtn.disabled = true;
+        msg(el.measurementMsg, "Rasm yuklanmoqda...", "warn");
+        try {
+          const photoFileId = await uploadPhoto("measurement", file);
+          const visit = {
+            id: uid(),
+            date: el.measurementDate.value,
+            client: clean(el.measurementClient.value),
+            projectId: project?.id || "",
+            projectName: project?.name || "",
+            address: clean(el.measurementAddress.value),
+            workerName: clean(el.measurementWorker.value),
+            dimensions: clean(el.measurementSizes.value),
+            note: clean(el.measurementNote.value),
+            photoFileId,
+            createdAt: new Date().toISOString()
+          };
+          state.finance.measurements.push(visit);
+          if (!await saveFinance()) {
+            state.finance.measurements = state.finance.measurements.filter(item => item.id !== visit.id);
+            throw new Error("Rasm yuklandi, ammo qayd platformaga saqlanmadi. Qayta urinib ko'ring.");
+          }
+          el.measurementForm.reset();
+          el.measurementDate.value = today();
+          el.measurementWorker.value = state.currentUser.username;
+          renderMeasurements();
+          msg(el.measurementMsg, "Joyga chiqish va o'lchovlar saqlandi.", "ok");
+        } catch (err) {
+          msg(el.measurementMsg, err.message || "O'lchovlarni saqlashda xatolik.", "err");
+        } finally {
+          el.measurementSubmitBtn.disabled = false;
+        }
+      });
+      el.announcementForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          const result = await apiRequest("/api/telegram/announcement", {
+            method: "POST",
+            body: JSON.stringify({ text: el.announcementText.value })
+          });
+          if (result.ok) {
+            el.announcementForm.reset();
+            msg(el.announcementMsg, "E'lon montajchilar guruhiga yuborildi.", "ok");
+          }
+        } catch (err) {
+          msg(el.announcementMsg, err.message || "E'lon yuborilmadi.", "err");
+        }
+      });
       el.eType.addEventListener("change", toggleExpenseTypeInputs);
+      el.dashboardYear.addEventListener("change", renderDashboardPeriod);
+      el.dashboardMonth.addEventListener("change", renderDashboardPeriod);
+      el.reportYear.addEventListener("change", renderReports);
+      el.reportMonth.addEventListener("change", renderReports);
+      el.exportReportBtn.addEventListener("click", exportReportCsv);
+      el.eAmount.addEventListener("input", updateAllocationTotal);
+      el.expenseAllocations.addEventListener("input", updateAllocationTotal);
+      el.expenseAllocations.addEventListener("change", updateAllocationTotal);
+      el.expenseAllocations.addEventListener("click", event => {
+        const removeButton = event.target.closest("[data-remove-allocation]");
+        if (removeButton) {
+          removeButton.closest("[data-allocation-row]").remove();
+          if (!el.expenseAllocations.querySelector("[data-allocation-row]")) renderAllocationRows([]);
+          updateAllocationTotal();
+        }
+      });
+      el.addAllocationBtn.addEventListener("click", () => {
+        const rows = Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-row]")).map(row => ({
+          projectId: row.querySelector("[data-allocation-project]").value,
+          amount: row.querySelector("[data-allocation-amount]").value
+        }));
+        rows.push({ projectId: "", amount: "" });
+        renderAllocationRows(rows);
+      });
       if (el.markPaidBtn) {
         el.markPaidBtn.addEventListener("click", async () => {
           if (!isSuperAdmin()) return;
@@ -1035,6 +1745,7 @@ const TOKEN_KEY = "pp_token_v1";
             if (data.finance) {
               const saved = data.finance;
               state.finance.projects = Array.isArray(saved.projects) ? saved.projects : [];
+              state.finance.payments = Array.isArray(saved.payments) ? saved.payments : [];
               state.finance.workers = Array.isArray(saved.workers) ? saved.workers : [];
               state.finance.founders = Array.isArray(saved.founders) ? saved.founders : [];
               state.finance.expenses = Array.isArray(saved.expenses) ? saved.expenses : [];
@@ -1052,24 +1763,70 @@ const TOKEN_KEY = "pp_token_v1";
         });
       }
 
-      el.projectForm.addEventListener("submit", (e) => {
+      el.projectForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         if (blockIfPaymentLocked(el.projectMsg)) return;
+        const existingProject = editState.projectId
+          ? state.finance.projects.find(project => project.id === editState.projectId)
+          : null;
         const rec = {
           id: editState.projectId || uid(),
           name: clean(el.pName.value), client: clean(el.pClient.value), clientLogin: clean(el.pClientLogin.value).toLowerCase(),
           startDate: el.pStart.value, dueDate: el.pDue.value,
-          amount: num(el.pAmount.value), advance: num(el.pAdvance.value), paymentType: clean(el.pType.value), status: clean(el.pStatus.value)
+          amount: num(el.pAmount.value), advance: existingProject ? num(existingProject.advance) : num(el.pAdvance.value),
+          paymentType: clean(el.pType.value), status: clean(el.pStatus.value)
         };
         if (!rec.name || !rec.client || !rec.startDate || !rec.dueDate) return msg(el.projectMsg, "Majburiy maydonlarni to'ldiring.", "err");
         if (rec.dueDate < rec.startDate) return msg(el.projectMsg, "Topshirish muddati oldin bo'lishi mumkin emas.", "err");
         if (rec.amount <= 0 || rec.advance < 0 || rec.advance > rec.amount) return msg(el.projectMsg, "Summa/advance noto'g'ri.", "err");
+        const previousProjects = state.finance.projects;
+        const previousPayments = state.finance.payments;
         if (editState.projectId) state.finance.projects = state.finance.projects.map(p => p.id === rec.id ? rec : p);
-        else state.finance.projects.unshift(rec);
-        saveFinance(); resetProjectForm(); msg(el.projectMsg, "Loyiha saqlandi.", "ok"); refreshAll();
+        else {
+          state.finance.projects = [rec, ...state.finance.projects];
+          if (rec.advance > 0) state.finance.payments = [{
+            id: uid(), projectId: rec.id, projectName: rec.name, clientName: rec.client,
+            date: rec.startDate, amount: rec.advance, paymentType: rec.paymentType,
+            note: "Zakaz ochilgandagi oldindan to'lov"
+          }, ...state.finance.payments];
+        }
+        if (!await saveFinance()) {
+          state.finance.projects = previousProjects;
+          state.finance.payments = previousPayments;
+          return msg(el.projectMsg, "Loyihani saqlashda xatolik yuz berdi.", "err");
+        }
+        resetProjectForm(); msg(el.projectMsg, "Loyiha saqlandi.", "ok"); refreshAll();
       });
       el.projectCancelEdit.addEventListener("click", resetProjectForm);
-      el.projectReset.addEventListener("click", () => { el.projectForm.reset(); msg(el.projectMsg, "", ""); });
+      el.projectReset.addEventListener("click", resetProjectForm);
+
+      el.paymentForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        if (blockIfPaymentLocked(el.paymentMsg)) return;
+        const project = state.finance.projects.find(item => item.id === el.paymentProjectId.value);
+        const amount = num(el.paymentAmount.value);
+        if (!project) return msg(el.paymentMsg, "Zakazni tanlang.", "err");
+        if (amount <= 0 || amount > Math.max(num(project.amount) - num(project.advance), 0)) {
+          return msg(el.paymentMsg, "To'lov summasi 0 dan katta va zakaz qarzidan oshmasligi kerak.", "err");
+        }
+        const payment = {
+          id: uid(), projectId: project.id, projectName: project.name, clientName: project.client,
+          date: el.paymentDate.value || today(), amount, paymentType: clean(el.paymentType.value),
+          note: clean(el.paymentNote.value)
+        };
+        project.advance = num(project.advance) + amount;
+        state.finance.payments.unshift(payment);
+        const saved = await saveFinance();
+        if (!saved) {
+          project.advance -= amount;
+          state.finance.payments = state.finance.payments.filter(item => item.id !== payment.id);
+          return msg(el.paymentMsg, "To'lovni saqlashda xatolik yuz berdi.", "err");
+        }
+        el.paymentForm.reset();
+        el.paymentDate.value = today();
+        msg(el.paymentMsg, "To'lov saqlandi.", "ok");
+        refreshAll();
+      });
 
       el.workerForm.addEventListener("submit", (e) => {
         e.preventDefault();
@@ -1097,14 +1854,21 @@ const TOKEN_KEY = "pp_token_v1";
       el.founderCancelEdit.addEventListener("click", resetFounderForm);
       el.founderReset.addEventListener("click", () => { el.founderForm.reset(); msg(el.founderMsg, "", ""); });
 
-      el.expenseForm.addEventListener("submit", (e) => {
+      el.expenseForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         if (blockIfPaymentLocked(el.expenseMsg)) return;
-        const existingExpense = editState.expenseId
-          ? state.finance.expenses.find(x => x.id === editState.expenseId)
-          : null;
-        const sourceProjectId = el.eProjectId.value || null;
-        const sourceProject = state.finance.projects.find(p => p.id === sourceProjectId);
+        const existingExpense = editState.expenseId ? state.finance.expenses.find(x => x.id === editState.expenseId) : null;
+        const allocations = readExpenseAllocations();
+        const uniqueProjectIds = new Set(allocations.map(allocation => allocation.projectId));
+        const allocationTotal = allocations.reduce((sum, allocation) => sum + allocation.amount, 0);
+        const invalidProject = allocations.some(allocation =>
+          !state.finance.projects.some(project => project.id === allocation.projectId) &&
+          !expenseAllocations(existingExpense || {}).some(previous => previous.projectId === allocation.projectId)
+        );
+        if (!allocations.length || invalidProject || allocations.some(allocation => !allocation.projectId || allocation.amount <= 0) ||
+            uniqueProjectIds.size !== allocations.length || Math.abs(allocationTotal - num(el.eAmount.value)) >= 0.01) {
+          return msg(el.expenseMsg, "Xarajat summasini takrorlanmagan zakazlarga to'liq taqsimlang.", "err");
+        }
         const rec = {
           id: editState.expenseId || uid(),
           date: el.eDate.value || today(),
@@ -1114,28 +1878,36 @@ const TOKEN_KEY = "pp_token_v1";
           note: clean(el.eNote.value),
           workerId: null,
           founderId: null,
-          sourceProjectId,
-          sourceProjectName: sourceProject?.name || (sourceProjectId ? existingExpense?.sourceProjectName || "" : "")
+          allocations
         };
         if (!rec.date || rec.amount <= 0) return msg(el.expenseMsg, "Sana va summa to'g'ri bo'lsin.", "err");
         if (!EXPENSE_PAYMENT_LABEL[rec.paymentType]) return msg(el.expenseMsg, "To'lov turini tanlang.", "err");
-        if (rec.type === "oylik_avans") {
+        if (rec.type === "oylik_avans" || rec.type === "oylik_tolov") {
           rec.workerId = el.eWorkerId.value;
           if (!rec.workerId) return msg(el.expenseMsg, "Ishchini tanlang.", "err");
           const worker = state.finance.workers.find(w => w.id === rec.workerId);
           if (!worker) return msg(el.expenseMsg, "Ishchi topilmadi.", "err");
-          const currentAdvance = workerAdvanceById()[worker.id] || 0;
-          const oldAmount = editState.expenseId ? (state.finance.expenses.find(x => x.id === rec.id)?.amount || 0) : 0;
-          if (currentAdvance - oldAmount + rec.amount > num(worker.salary)) return msg(el.expenseMsg, "Avans ishchi oyligidan oshib ketmoqda.", "err");
+          rec.workerName = worker.name;
+          const oldAmount = existingExpense?.workerId === worker.id ? num(existingExpense.amount) : 0;
+          const advanceTotal = workerAdvanceById()[worker.id] || 0;
+          const salaryPaid = workerSalaryPaidById()[worker.id] || 0;
+          const advanceAfterSave = advanceTotal - (existingExpense?.type === "oylik_avans" ? oldAmount : 0) + (rec.type === "oylik_avans" ? rec.amount : 0);
+          const paidAfterSave = salaryPaid - (existingExpense?.type === "oylik_tolov" ? oldAmount : 0) + (rec.type === "oylik_tolov" ? rec.amount : 0);
+          if (advanceAfterSave + paidAfterSave > num(worker.salary)) return msg(el.expenseMsg, "Oylik avansi va to'lovlari ishchi oyligidan oshib ketmoqda.", "err");
         }
         if (rec.type === "founder_avans") {
           rec.founderId = el.eFounderId.value;
           if (!rec.founderId) return msg(el.expenseMsg, "Ta'sischini tanlang.", "err");
-          if (!rec.sourceProjectId) return msg(el.expenseMsg, "Ta'sischi avansi uchun zakazni tanlang.", "err");
+          rec.founderName = state.finance.founders.find(founder => founder.id === rec.founderId)?.name || "";
         }
+        const previousExpenses = state.finance.expenses;
         if (editState.expenseId) state.finance.expenses = state.finance.expenses.map(x => x.id === rec.id ? rec : x);
-        else state.finance.expenses.unshift(rec);
-        saveFinance(); resetExpenseForm(); msg(el.expenseMsg, "Xarajat saqlandi.", "ok"); refreshAll();
+        else state.finance.expenses = [rec, ...state.finance.expenses];
+        if (!await saveFinance()) {
+          state.finance.expenses = previousExpenses;
+          return msg(el.expenseMsg, "Xarajatni saqlashda xatolik yuz berdi.", "err");
+        }
+        resetExpenseForm(); msg(el.expenseMsg, "Xarajat saqlandi.", "ok"); refreshAll();
       });
       el.expenseCancelEdit.addEventListener("click", resetExpenseForm);
       el.expenseReset.addEventListener("click", () => {
@@ -1177,7 +1949,7 @@ const TOKEN_KEY = "pp_token_v1";
       el.clearData.addEventListener("click", () => {
         if (!isSuperAdmin()) return msg(el.settingsMsg, "Barcha ma'lumotni tozalash faqat super admin uchun.", "err");
         if (!confirm("Barcha loyiha/ishchi/ta'sischi/xarajat ma'lumotlarini tozalaysizmi?")) return;
-        state.finance = { projects: [], workers: [], founders: [], expenses: [], archives: state.finance.archives || [], payment: state.finance.payment || { locked: false }, settings: { tax: 0, reserve: 0, other: 0 } };
+        state.finance = { projects: [], payments: [], workers: [], founders: [], expenses: [], archives: state.finance.archives || [], measurements: [], designs: [], payment: state.finance.payment || { locked: false }, settings: { tax: 0, reserve: 0, other: 0 } };
         saveFinance(); resetProjectForm(); resetWorkerForm(); resetFounderForm(); resetExpenseForm();
         msg(el.settingsMsg, "Barcha ma'lumotlar 0 qilindi.", "warn"); refreshAll();
       });
@@ -1214,8 +1986,28 @@ const TOKEN_KEY = "pp_token_v1";
       renderPermGrid();
       setTheme(localStorage.getItem(THEME_KEY) || "light");
       el.eDate.value = today();
+      el.paymentDate.value = today();
+      el.measurementDate.value = today();
+      el.measurementWorker.value = state.currentUser?.username || "";
       toggleExpenseTypeInputs();
       await bootSession();
+      window.setInterval(async () => {
+        if (!state.currentUser || !localStorage.getItem(TOKEN_KEY)) return;
+        try {
+          const data = await apiRequest("/api/finance");
+          if (data.finance?.payment) {
+            if (state.finance.payment?.currentMonth && state.finance.payment.currentMonth !== data.finance.payment.currentMonth) {
+              applyFinanceSnapshot(data.finance);
+              refreshAll();
+              return;
+            }
+            state.finance.payment = data.finance.payment;
+            renderPaymentLock();
+          }
+        } catch (err) {
+          console.error("Payment reminder refresh failed:", err);
+        }
+      }, 60000);
 
       // Check setup status from server (first-time super admin)
       try {

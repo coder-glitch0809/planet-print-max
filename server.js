@@ -1,9 +1,11 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const admin = require("firebase-admin");
+require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,14 +29,17 @@ clearDeadLocalProxy();
 
 const DEFAULT_FINANCE = {
   projects: [],
+  payments: [],
   workers: [],
   founders: [],
   expenses: [],
   archives: [],
+  measurements: [],
+  designs: [],
   payment: { lastArchiveMonth: "", lastPaidMonth: "" },
   settings: { tax: 0, reserve: 0, other: 0 }
 };
-const FINANCE_PERMS = ["dashboard", "projects", "workers", "founders", "expenses", "settings"];
+const FINANCE_PERMS = ["dashboard", "projects", "designs", "workers", "founders", "expenses", "payments", "reports", "measurements", "settings"];
 
 let firestore;
 const memoryStore = global.__planetPrintMemoryStore || {
@@ -144,7 +149,7 @@ function fallbackAdminUser() {
     id: "fallback-super-admin",
     username: FALLBACK_ADMIN_USER,
     role: "super_admin",
-    permissions: JSON.stringify(["dashboard", "projects", "workers", "founders", "expenses", "users", "settings"])
+    permissions: JSON.stringify(["dashboard", "projects", "designs", "workers", "founders", "expenses", "payments", "reports", "measurements", "users", "settings"])
   };
 }
 
@@ -162,16 +167,21 @@ function normalizeFinance(finance) {
   const src = finance && typeof finance === "object" ? finance : {};
   return {
     projects: Array.isArray(src.projects) ? src.projects : [],
+    payments: Array.isArray(src.payments) ? src.payments : [],
     workers: Array.isArray(src.workers) ? src.workers : [],
     founders: Array.isArray(src.founders) ? src.founders : [],
     expenses: Array.isArray(src.expenses) ? src.expenses : [],
     archives: Array.isArray(src.archives) ? src.archives : [],
+    measurements: Array.isArray(src.measurements) ? src.measurements : [],
+    designs: Array.isArray(src.designs) ? src.designs : [],
     payment: {
       lastArchiveMonth: sanitizeText(src.payment?.lastArchiveMonth, 12),
       lastPaidMonth: sanitizeText(src.payment?.lastPaidMonth, 12),
       currentMonth: sanitizeText(src.payment?.currentMonth, 12),
       dueDay: Number(src.payment?.dueDay) || 5,
-      locked: !!src.payment?.locked
+      locked: !!src.payment?.locked,
+      reminder: !!src.payment?.reminder,
+      daysUntilDue: Number(src.payment?.daysUntilDue) || 0
     },
     settings: {
       tax: Number(src.settings?.tax) || 0,
@@ -202,26 +212,49 @@ function tashkentDateParts(date = new Date()) {
 function archiveOpenCycle(finance) {
   const next = normalizeFinance(finance);
   const now = tashkentDateParts();
-  const shouldArchive = now.day >= 5 && next.payment.lastArchiveMonth !== now.monthKey;
-  if (!shouldArchive) return next;
+  if (!next.payment.currentMonth) next.payment.currentMonth = now.monthKey;
+  if (next.payment.currentMonth >= now.monthKey) return next;
 
-  if (next.projects.length || next.expenses.length) {
+  const archivedMonth = next.payment.currentMonth;
+  const archivedAt = new Date().toISOString();
+  const archivedProjects = next.projects.map((project) => {
+    const debt = Math.max(Number(project.amount || 0) - Number(project.advance || 0), 0);
+    return {
+      ...project,
+      debtClosed: debt === 0,
+      debtClosedAt: debt === 0 ? archivedAt : "",
+      outstandingBalance: debt
+    };
+  });
+  if (!next.archives.some((archive) => archive.month === archivedMonth)) {
     next.archives.unshift({
-      id: `archive-${now.monthKey}-${Date.now()}`,
-      month: now.monthKey,
-      archivedAt: new Date().toISOString(),
-      projects: next.projects.map((project) => ({
-        ...project,
-        debtClosed: Number(project.advance) >= Number(project.amount),
-        debtClosedAt: Number(project.advance) >= Number(project.amount) ? new Date().toISOString() : ""
-      })),
-      expenses: next.expenses
+      id: `archive-${archivedMonth}`,
+      month: archivedMonth,
+      archivedAt,
+      projects: archivedProjects,
+      expenses: next.expenses,
+      payments: next.payments,
+      workers: next.workers,
+      founders: next.founders,
+      measurements: next.measurements,
+      designs: next.designs
     });
   }
 
-  next.projects = [];
+  next.projects = next.projects
+    .map((project) => {
+      const remaining = Math.max(Number(project.amount || 0) - Number(project.advance || 0), 0);
+      return remaining > 0
+        ? { ...project, amount: remaining, advance: 0, carriedFromMonth: archivedMonth }
+        : null;
+    })
+    .filter(Boolean);
   next.expenses = [];
-  next.payment.lastArchiveMonth = now.monthKey;
+  next.payments = [];
+  next.measurements = [];
+  next.designs = [];
+  next.payment.lastArchiveMonth = archivedMonth;
+  next.payment.currentMonth = now.monthKey;
   return next;
 }
 
@@ -231,12 +264,15 @@ function addPaymentLockInfo(finance) {
   next.payment.currentMonth = now.monthKey;
   next.payment.dueDay = 5;
   next.payment.locked = now.day >= 5 && next.payment.lastPaidMonth !== now.monthKey;
+  next.payment.reminder = next.payment.lastPaidMonth !== now.monthKey;
+  next.payment.daysUntilDue = Math.max(5 - now.day, 0);
   return next;
 }
 
 function canAccess(req, perm) {
   if (req.user?.role === "super_admin") return true;
   if (req.user?.role === "admin" && FINANCE_PERMS.includes(perm)) return true;
+  if (req.user?.role === "manager" && perm === "measurements") return true;
   const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
   return permissions.includes(perm);
 }
@@ -250,6 +286,14 @@ function clientProjectView(project) {
     startDate: project.startDate,
     dueDate: project.dueDate,
     status: project.status
+  };
+}
+
+function designerProjectView(project) {
+  return {
+    id: project.id,
+    name: project.name,
+    client: project.client
   };
 }
 
@@ -268,20 +312,28 @@ function visibleFinanceForUser(req, finance) {
       .map(clientProjectView);
     return {
       projects: assignedProjects,
+      payments: [],
       workers: [],
       founders: [],
       expenses: [],
       archives: [],
+      measurements: [],
+      designs: [],
       payment: full.payment,
       settings: { tax: 0, reserve: 0, other: 0 }
     };
   }
   return {
-    projects: canAccess(req, "projects") || canAccess(req, "dashboard") ? full.projects : [],
+    projects: canAccess(req, "projects") || canAccess(req, "dashboard")
+      ? full.projects
+      : canAccess(req, "designs") ? full.projects.map(designerProjectView) : [],
     workers: canAccess(req, "workers") ? full.workers : [],
     founders: canAccess(req, "founders") ? full.founders : [],
     expenses: canAccess(req, "expenses") ? full.expenses : [],
-    archives: canAccess(req, "dashboard") || canAccess(req, "projects") || canAccess(req, "expenses") ? full.archives : [],
+    payments: canAccess(req, "projects") ? full.payments : [],
+    archives: canAccess(req, "dashboard") || canAccess(req, "projects") || canAccess(req, "expenses") || canAccess(req, "reports") ? full.archives : [],
+    measurements: canAccess(req, "measurements") ? full.measurements : [],
+    designs: canAccess(req, "projects") || canAccess(req, "designs") ? full.designs : [],
     payment: full.payment,
     settings: canAccess(req, "settings") ? full.settings : { tax: 0, reserve: 0, other: 0 }
   };
@@ -295,13 +347,41 @@ function mergeFinanceForUser(req, currentFinance, incomingFinance) {
 
   const next = { ...current };
   if (canAccess(req, "projects")) next.projects = incoming.projects;
+  if (canAccess(req, "projects")) next.payments = incoming.payments;
   if (canAccess(req, "workers")) next.workers = incoming.workers;
   if (canAccess(req, "founders")) next.founders = incoming.founders;
   if (canAccess(req, "expenses")) next.expenses = incoming.expenses;
+  if (canAccess(req, "measurements")) next.measurements = incoming.measurements;
+  if (canAccess(req, "projects") || canAccess(req, "designs")) next.designs = incoming.designs;
   if (canAccess(req, "settings")) next.settings = incoming.settings;
   next.archives = current.archives;
   next.payment = current.payment;
   return next;
+}
+
+function validateNewExpenseAllocations(currentFinance, nextFinance) {
+  const current = normalizeFinance(currentFinance);
+  const next = normalizeFinance(nextFinance);
+  const existingById = new Map(current.expenses.map((expense) => [String(expense.id), expense]));
+  const validProjectIds = new Set(next.projects.map((project) => String(project.id)));
+  for (const expense of next.expenses) {
+    const allocations = Array.isArray(expense.allocations) ? expense.allocations : [];
+    const total = allocations.reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0);
+    const previous = existingById.get(String(expense.id));
+    const previousProjectIds = new Set((previous?.allocations || [])
+      .map((allocation) => String(allocation.projectId || "")));
+    if (previous?.sourceProjectId) previousProjectIds.add(String(previous.sourceProjectId));
+    const valid = allocations.length > 0 &&
+      allocations.every((allocation) => allocation.projectId && Number(allocation.amount) > 0 &&
+        (validProjectIds.has(String(allocation.projectId)) || previousProjectIds.has(String(allocation.projectId)))) &&
+      new Set(allocations.map((allocation) => allocation.projectId)).size === allocations.length &&
+      Math.abs(total - Number(expense.amount || 0)) < 0.01;
+    if (valid) continue;
+
+    if (previous && JSON.stringify(previous) === JSON.stringify(expense)) continue;
+    return `Xarajat "${sanitizeText(expense.type, 40)}" summasi zakazlarga to'liq taqsimlanishi shart.`;
+  }
+  return "";
 }
 
 function sendLogin(res, user) {
@@ -354,7 +434,7 @@ function sanitizeText(text, max = 120) {
     .slice(0, max);
 }
 
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({ limit: "8mb" }));
 app.use("/assets", express.static(path.join(__dirname, "assets")));
 app.get("/styles.css", (_req, res) => res.sendFile(path.join(__dirname, "styles.css")));
 app.get("/app.js", (_req, res) => res.sendFile(path.join(__dirname, "app.js")));
@@ -371,10 +451,130 @@ app.use("/api", async (_req, res, next) => {
   next();
 });
 
+function telegramToken() {
+  if (!process.env.TELEGRAM_BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN sozlanmagan.");
+  return process.env.TELEGRAM_BOT_TOKEN;
+}
+
+async function telegramApi(method, body, isForm = false) {
+  const token = telegramToken();
+  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: "POST",
+    headers: isForm ? undefined : { "Content-Type": "application/json" },
+    body: isForm ? body : JSON.stringify(body),
+    signal: AbortSignal.timeout(20000)
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) {
+    throw new Error(result.description || `Telegram API xatosi (${response.status}).`);
+  }
+  return result.result;
+}
+
+function installersChatId() {
+  const chatId = String(process.env.TELEGRAM_INSTALLERS_CHAT_ID || "").trim();
+  if (!chatId) throw new Error("TELEGRAM_INSTALLERS_CHAT_ID sozlanmagan.");
+  return chatId;
+}
+
+function mediaChatId() {
+  const chatId = String(process.env.TELEGRAM_MEDIA_CHAT_ID || "").trim();
+  if (!chatId) throw new Error("TELEGRAM_MEDIA_CHAT_ID sozlanmagan; rasmlar uchun bot kiradigan yopiq media chat kerak.");
+  return chatId;
+}
+
+async function paymentIsLockedForUser(user) {
+  if (!firestore || user.id === "fallback-super-admin" || memoryStore.users.some((item) => item.id === user.id)) {
+    return addPaymentLockInfo(archiveOpenCycle(memoryStore.finance)).payment.locked;
+  }
+  const doc = await firestore.collection("settings").doc("finance").get();
+  const value = doc.exists ? doc.data() : { data: DEFAULT_FINANCE };
+  const finance = value.data ?? value;
+  return addPaymentLockInfo(archiveOpenCycle(finance)).payment.locked;
+}
+
 // --- API Routes ---
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, now: new Date().toISOString(), db: !!firestore, fallback: !!dbInitError });
+});
+
+app.post("/api/telegram/upload-photo", authRequired, async (req, res) => {
+  try {
+    const kind = req.body?.kind === "measurement" ? "measurement" : "design";
+    if (kind === "measurement" && !canAccess(req, "measurements")) return res.status(403).json({ error: "O'lchovlar huquqi kerak." });
+    if (kind === "measurement" && ["viewer", "client"].includes(req.user.role)) return res.status(403).json({ error: "O'lchov rasmi yuklash huquqi yo'q." });
+    if (kind === "design" && !canAccess(req, "designs") && !canAccess(req, "projects")) return res.status(403).json({ error: "Dizaynlar huquqi kerak." });
+    if (kind === "design" && (req.user.role === "viewer" || req.user.role === "client")) return res.status(403).json({ error: "Dizayn yuborish huquqi yo'q." });
+    if (req.user.role !== "super_admin" && await paymentIsLockedForUser(req.user)) {
+      return res.status(423).json({ error: "To'lov qilinmaguncha tizim yopiq." });
+    }
+    const match = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(req.body?.image || ""));
+    if (!match) return res.status(400).json({ error: "Faqat JPEG, PNG yoki WebP rasm qabul qilinadi." });
+    const image = Buffer.from(match[2], "base64");
+    if (!image.length || image.length > 3 * 1024 * 1024) return res.status(413).json({ error: "Siqilgan rasm 3 MB dan kichik bo'lishi kerak." });
+    const form = new FormData();
+    form.set("chat_id", mediaChatId());
+    form.set("photo", new Blob([image], { type: `image/${match[1]}` }), `planet-print-${crypto.randomUUID()}.${match[1]}`);
+    form.set("caption", kind === "measurement" ? "Planet Print | O'lchov rasmi" : "Planet Print | Dizayn");
+    const sent = await telegramApi("sendPhoto", form, true);
+    const photo = sent.photo?.at(-1);
+    if (!photo?.file_id) throw new Error("Telegram rasm file_id qaytarmadi.");
+    res.json({ fileId: photo.file_id });
+  } catch (err) {
+    console.error("Telegram photo upload failed:", err.message);
+    res.status(502).json({ error: err.message || "Rasm Telegramga yuborilmadi." });
+  }
+});
+
+app.post("/api/telegram/send-design", authRequired, async (req, res) => {
+  try {
+    if ((!canAccess(req, "designs") && !canAccess(req, "projects")) || ["viewer", "client", "worker"].includes(req.user.role)) return res.status(403).json({ error: "Dizayn yuborish huquqi yo'q." });
+    if (req.user.role !== "super_admin" && await paymentIsLockedForUser(req.user)) return res.status(423).json({ error: "To'lov qilinmaguncha tizim yopiq." });
+    if (req.body?.approved !== true) return res.status(400).json({ error: "Tasdiqlangan dizayn ekanini belgilang." });
+    const fileId = String(req.body?.fileId || "");
+    const caption = sanitizeText(req.body?.caption, 900);
+    if (!fileId || !caption) return res.status(400).json({ error: "Dizayn fayli va izoh talab qilinadi." });
+    const result = await telegramApi("sendPhoto", {
+      chat_id: installersChatId(),
+      photo: fileId,
+      caption
+    });
+    res.json({ ok: true, messageId: result.message_id });
+  } catch (err) {
+    console.error("Approved design Telegram delivery failed:", err.message);
+    res.status(502).json({ error: err.message || "Dizayn montajchilar guruhiga yuborilmadi." });
+  }
+});
+
+app.get("/api/telegram/photo/:fileId", authRequired, async (req, res) => {
+  if (!canAccess(req, "measurements") && !canAccess(req, "projects")) return res.status(403).json({ error: "Rasmni ko'rish huquqi yo'q." });
+  const fileId = String(req.params.fileId || "");
+  if (!/^[A-Za-z0-9_-]{10,512}$/.test(fileId)) return res.status(400).json({ error: "Rasm identifikatori noto'g'ri." });
+  try {
+    const file = await telegramApi("getFile", { file_id: fileId });
+    if (!file.file_path) return res.status(404).json({ error: "Telegram rasmi topilmadi." });
+    const response = await fetch(`https://api.telegram.org/file/bot${telegramToken()}/${file.file_path}`, { signal: AbortSignal.timeout(20000) });
+    if (!response.ok) throw new Error(`Telegram faylini olishda xato (${response.status}).`);
+    res.type(path.extname(file.file_path).slice(1) || "jpeg");
+    res.set("Cache-Control", "private, max-age=300");
+    res.send(Buffer.from(await response.arrayBuffer()));
+  } catch (err) {
+    console.error("Telegram photo retrieval failed:", err.message);
+    res.status(502).json({ error: err.message || "Rasmni olib bo'lmadi." });
+  }
+});
+
+app.post("/api/telegram/announcement", authRequired, superAdminRequired, async (req, res) => {
+  const text = sanitizeText(req.body?.text, 3500);
+  if (!text) return res.status(400).json({ error: "E'lon matnini kiriting." });
+  try {
+    const result = await telegramApi("sendMessage", { chat_id: installersChatId(), text });
+    res.json({ ok: true, messageId: result.message_id });
+  } catch (err) {
+    console.error("Telegram announcement failed:", err.message);
+    res.status(502).json({ error: err.message || "E'lon Telegramga yuborilmadi." });
+  }
 });
 
 app.get("/api/auth/setup-status", async (_req, res) => {
@@ -402,7 +602,7 @@ app.post("/api/auth/setup", async (req, res) => {
 
   const passHash = await bcrypt.hash(password, 10);
   const id = Math.random().toString(36).slice(2, 10);
-  const permissions = JSON.stringify(["dashboard", "projects", "workers", "founders", "expenses", "users", "settings"]);
+  const permissions = JSON.stringify(["dashboard", "projects", "designs", "workers", "founders", "expenses", "payments", "reports", "measurements", "users", "settings"]);
 
   try {
     if (email) {
@@ -506,7 +706,7 @@ app.post("/api/auth/google", async (req, res) => {
     
     if (q.empty) {
       const id = Math.random().toString(36).slice(2, 10);
-      const permissions = JSON.stringify(["dashboard", "projects", "workers", "founders", "expenses"]);
+      const permissions = JSON.stringify(["dashboard", "projects", "designs", "workers", "founders", "expenses", "payments", "reports", "measurements"]);
       await usersRef.doc(id).set({
         username,
         passHash: "",
@@ -591,7 +791,10 @@ app.put("/api/finance", authRequired, async (req, res) => {
     if (current.payment.locked && req.user.role !== "super_admin") {
       return res.status(423).json({ error: "To'lov sanasi. Super admin to'lov qilindi deb belgilamaguncha tizim yopiq." });
     }
-    memoryStore.finance = mergeFinanceForUser(req, current, finance);
+    const mergedFinance = mergeFinanceForUser(req, current, finance);
+    const allocationError = validateNewExpenseAllocations(current, mergedFinance);
+    if (allocationError) return res.status(400).json({ error: allocationError });
+    memoryStore.finance = mergedFinance;
     return res.json({ ok: true, storage: "memory" });
   }
   const financeDoc = await firestore.collection("settings").doc("finance").get();
@@ -603,6 +806,8 @@ app.put("/api/finance", authRequired, async (req, res) => {
     return res.status(423).json({ error: "To'lov sanasi. Super admin to'lov qilindi deb belgilamaguncha tizim yopiq." });
   }
   const mergedFinance = mergeFinanceForUser(req, currentFinance, finance);
+  const allocationError = validateNewExpenseAllocations(currentFinance, mergedFinance);
+  if (allocationError) return res.status(400).json({ error: allocationError });
   
   await firestore.collection("settings").doc("finance").set({
     data: normalizeFinance(mergedFinance),
@@ -665,7 +870,7 @@ app.post("/api/users", authRequired, superAdminRequired, async (req, res) => {
   const permissions = Array.isArray(req.body?.permissions) ? req.body.permissions.map(x => sanitizeText(x, 30)).filter(Boolean) : [];
 
   if (!username || password.length < 8) return res.status(400).json({ error: "Invalid credentials" });
-  if (!["admin", "manager", "viewer", "client"].includes(role)) return res.status(400).json({ error: "Invalid role" });
+  if (!["admin", "manager", "designer", "worker", "viewer", "client"].includes(role)) return res.status(400).json({ error: "Invalid role" });
 
   const passHash = await bcrypt.hash(password, 10);
   const id = Math.random().toString(36).slice(2, 10);
