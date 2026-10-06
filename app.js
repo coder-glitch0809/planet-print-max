@@ -120,6 +120,7 @@ const TOKEN_KEY = "pp_token_v1";
       designProject: document.getElementById("designProject"),
       designImage: document.getElementById("designImage"),
       designNote: document.getElementById("designNote"),
+      designDimensions: document.getElementById("designDimensions"),
       designApproved: document.getElementById("designApproved"),
       designSubmitBtn: document.getElementById("designSubmitBtn"),
       designMsg: document.getElementById("designMsg"),
@@ -298,7 +299,7 @@ const TOKEN_KEY = "pp_token_v1";
       if (role === "manager") return ["dashboard", "projects", "designs", "workers", "founders", "expenses", "payments", "reports", "measurements"];
       if (role === "accountant") return ["payments", "expenses", "reports"];
       if (role === "designer") return ["designs"];
-      if (role === "worker") return ["measurements"];
+      if (role === "worker") return ["designs"];
       if (role === "client") return ["projects"];
       return ["dashboard"];
     }
@@ -610,6 +611,7 @@ const TOKEN_KEY = "pp_token_v1";
       el.designProject.innerHTML = `<option value="">Zakazni tanlang</option>${options}`;
       el.measurementProject.innerHTML = `<option value="">Zakazsiz</option>${options}`;
       el.designForm.closest(".design-panel").classList.toggle("hidden", !hasPerm("designs") && !canEditProjects());
+      el.designForm.classList.toggle("hidden", ["worker", "viewer", "client"].includes(state.currentUser?.role));
       el.measurementForm.classList.toggle("hidden", !hasPerm("measurements") || ["viewer", "client"].includes(state.currentUser?.role));
     }
 
@@ -621,10 +623,10 @@ const TOKEN_KEY = "pp_token_v1";
       el.designsBody.innerHTML = [...state.finance.designs].reverse().map(design => `<tr>
         <td>${clean(design.date || "-")}</td>
         <td>${clean(design.projectName || "-")}</td>
-        <td>${clean(design.note || "-")}</td>
+        <td>${clean(design.dimensions || "O'lcham kiritilmagan")}<br>${clean(design.note || "-")}</td>
         <td><span class="pill ${design.sent ? "s-done" : "s-due"}">${design.sent ? "Telegramga yuborilgan" : "Yuborilmagan"}</span></td>
         <td><button class="ghost small-btn" type="button" data-open-photo="${clean(design.photoFileId)}">Rasm</button>
-        ${design.sent ? "" : `<button class="small-btn" type="button" data-send-design="${clean(design.id)}">Qayta yuborish</button>`}</td>
+        ${design.sent || ["worker", "viewer", "client"].includes(state.currentUser?.role) ? "" : `<button class="small-btn" type="button" data-send-design="${clean(design.id)}">Qayta yuborish</button>`}</td>
       </tr>`).join("");
     }
 
@@ -697,22 +699,21 @@ const TOKEN_KEY = "pp_token_v1";
       const result = await apiRequest("/api/telegram/send-design", {
         method: "POST",
         body: JSON.stringify({
-          approved: true,
-          fileId: design.photoFileId,
-          caption: `Tasdiqlangan dizayn\nZakaz: ${design.projectName}\nMijoz: ${design.clientName}\n${design.note || ""}`.trim()
+          designId: design.id
         })
       });
       const index = state.finance.designs.findIndex(item => item.id === design.id);
       if (index >= 0) {
         state.finance.designs[index] = {
           ...state.finance.designs[index],
-          sent: true,
+          sent: result.delivery.failed === 0,
           telegramMessageId: result.messageId,
           sentAt: new Date().toISOString()
         };
         if (!await saveFinance()) throw new Error("Telegramga yuborildi, lekin yuborilgan holatini bazaga saqlab bo'lmadi.");
       }
       renderDesigns();
+      if (result.delivery.failed) throw new Error(`${result.delivery.sent} ta xodimga yuborildi, ${result.delivery.failed} tasiga yuborilmadi. Qayta yuborish mumkin.`);
     }
 
     function renderWorkers() {
@@ -740,7 +741,6 @@ const TOKEN_KEY = "pp_token_v1";
         const w = state.finance.workers.find(x => x.id === b.getAttribute("data-edit-w")); if (!w) return;
         editState.workerId = w.id;
         document.getElementById("wPhone").value = w.phone || "";
-        document.querySelectorAll("[data-notify]").forEach(i => { i.checked = (w.notifications || []).includes(i.dataset.notify); });
         el.wName.value = w.name; el.wRole.value = w.role; el.wSalary.value = w.salary;
         setFormEditMode(el.workerForm, el.workerSubmitBtn, el.workerCancelEdit, true);
       }));
@@ -1429,15 +1429,16 @@ const TOKEN_KEY = "pp_token_v1";
     }
 
     function renderUsersTable() {
-      if (state.currentUser.role !== "super_admin") { el.usersBody.innerHTML = `<tr><td colspan="4">Faqat super admin ko'ra oladi.</td></tr>`; return; }
+      if (state.currentUser.role !== "super_admin") { el.usersBody.innerHTML = `<tr><td colspan="5">Faqat super admin ko'ra oladi.</td></tr>`; return; }
       el.usersBody.innerHTML = state.users.map((u) => `<tr>
-        <td>${clean(u.username)}</td><td>${clean(u.role)}</td><td>${(u.permissions || []).map(p => clean(PAGE_TITLES[p] || p)).join(", ") || "-"}</td>
+        <td>${clean(u.username)}</td><td>${clean(u.phone || "Kiritilmagan")}</td><td>${clean(u.role === "worker" ? "Montajnik" : u.role)}</td><td>${(u.permissions || []).map(p => clean(PAGE_TITLES[p] || p)).join(", ") || "-"}</td>
         <td>${u.role === "super_admin" ? "-" : `<button class="small-btn" type="button" data-edit-u="${clean(u.id)}">Tahrirlash</button> <button class="danger small-btn" type="button" data-del-u="${u.id}">O'chirish</button>`}</td>
       </tr>`).join("");
       el.usersBody.querySelectorAll("[data-edit-u]").forEach(button => button.addEventListener("click", () => {
         const user = state.users.find(u => u.id === button.dataset.editU);
         editingUserId = user.id;
         el.uName.value = user.username; el.uName.disabled = true;
+        document.getElementById("uPhone").value = user.phone || "";
         el.uEmail.required = false; el.uEmail.disabled = true;
         el.uPass.value = ""; el.uPass.required = false;
         el.uPass.placeholder = "O'zgartirish uchun yangi parol";
@@ -1622,7 +1623,7 @@ const TOKEN_KEY = "pp_token_v1";
         try {
           sendButton.disabled = true;
           await deliverDesign(design);
-          msg(el.designMsg, "Dizayn montajchilar guruhiga yuborildi.", "ok");
+          msg(el.designMsg, "Dizayn ruxsat berilgan foydalanuvchilarga yuborildi.", "ok");
         } catch (err) {
           msg(el.designMsg, err.message || "Dizayn yuborilmadi.", "err");
         } finally {
@@ -1660,6 +1661,7 @@ const TOKEN_KEY = "pp_token_v1";
             projectName: project.name,
             clientName: project.client,
             note: clean(el.designNote.value),
+            dimensions: clean(el.designDimensions.value),
             photoFileId,
             approved: true,
             approvedAt: new Date().toISOString(),
@@ -1674,7 +1676,7 @@ const TOKEN_KEY = "pp_token_v1";
           renderDesigns();
           await deliverDesign(design);
           el.designForm.reset();
-          msg(el.designMsg, "Tasdiqlangan dizayn Telegramdagi montajchilar guruhiga yuborildi.", "ok");
+          msg(el.designMsg, "Tasdiqlangan dizayn, o‘lcham va vazifa ruxsat berilgan foydalanuvchilarga yuborildi.", "ok");
         } catch (err) {
           msg(el.designMsg, err.message || "Dizaynni yuborishda xatolik.", "err");
         } finally {
@@ -1880,7 +1882,7 @@ const TOKEN_KEY = "pp_token_v1";
       el.workerForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         if (blockIfPaymentLocked(el.workerMsg)) return;
-        const rec = { id: editState.workerId || uid(), phone: document.getElementById("wPhone").value.replace(/\D/g, ""), notifications: Array.from(document.querySelectorAll("[data-notify]:checked")).map(i => i.dataset.notify), name: clean(el.wName.value), role: clean(el.wRole.value), salary: num(el.wSalary.value) };
+        const rec = { id: editState.workerId || uid(), phone: document.getElementById("wPhone").value.replace(/\D/g, ""), name: clean(el.wName.value), role: clean(el.wRole.value), salary: num(el.wSalary.value) };
         if (!rec.name || !rec.role || rec.salary <= 0) return msg(el.workerMsg, "Ma'lumotlarni to'g'ri kiriting.", "err");
         const previousWorkers = [...state.finance.workers];
         const phoneKey = value => { const digits = String(value || "").replace(/\D/g, ""); return digits.length === 9 ? `998${digits}` : digits; };
@@ -1988,7 +1990,8 @@ const TOKEN_KEY = "pp_token_v1";
           // Create user via server API (uses admin SDK)
           const token = localStorage.getItem(TOKEN_KEY);
           const email = (el.uEmail && el.uEmail.value) ? el.uEmail.value.trim() : '';
-          const resp = await fetch(editingUserId ? `/api/users/${editingUserId}` : '/api/users', { method: editingUserId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': token ? `Bearer ${token}` : '' }, body: JSON.stringify({ username, email, password, role, permissions }) });
+          const phone = document.getElementById("uPhone").value.trim();
+          const resp = await fetch(editingUserId ? `/api/users/${editingUserId}` : '/api/users', { method: editingUserId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': token ? `Bearer ${token}` : '' }, body: JSON.stringify({ username, email, phone, password, role, permissions }) });
           const j = await resp.json().catch(() => ({}));
           if (!resp.ok) return msg(el.userMsg, j.error || 'Foydalanuvchi yaratishda xatolik', 'err');
           await loadUsers();

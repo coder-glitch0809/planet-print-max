@@ -5,8 +5,27 @@ function normalizePhone(value) {
   return digits.length === 9 ? `998${digits}` : digits;
 }
 
+function accountPermissions(user) {
+  try {
+    const value = typeof user.permissions === "string" ? JSON.parse(user.permissions) : user.permissions;
+    return Array.isArray(value) ? value : [];
+  } catch { return []; }
+}
+
+function canReceive(user, category) {
+  if (user.role === "client") return false;
+  const permission = category === "approved_designs" ? "designs" : category === "announcements" ? "settings" : category;
+  if (user.role === "worker" && category !== "approved_designs") return false;
+  return user.role === "super_admin" || accountPermissions(user).includes(permission);
+}
+
 function createTelegramStaff({ app, authRequired, superAdminRequired, telegramApi, getFirestore, memoryStore, normalizeFinance }) {
   const memoryBindings = new Map();
+  async function accounts() {
+    const db = getFirestore();
+    const stored = db ? (await db.collection("users").get()).docs.map(doc => ({ ...doc.data(), id: doc.id })) : [];
+    return [...stored, ...memoryStore.users.filter(user => !stored.some(item => item.id === user.id))];
+  }
   async function finance() {
     const db = getFirestore();
     if (!db) return normalizeFinance(memoryStore.finance);
@@ -20,11 +39,11 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
     return db ? (await db.collection("telegramStaff").get()).docs.map(doc => doc.data()) : [...memoryBindings.values()];
   }
   async function bind(worker, message) {
-    const record = { workerId: worker.id, phone: normalizePhone(worker.phone), chatId: String(message.chat.id), userId: String(message.from.id) };
+    const record = { accountId: worker.id, phone: normalizePhone(worker.phone), chatId: String(message.chat.id), userId: String(message.from.id) };
     const db = getFirestore();
     if (db) {
       await db.runTransaction(async transaction => {
-        const ref = db.collection("telegramStaff").doc(String(worker.id));
+        const ref = db.collection("telegramStaff").doc(`account-${worker.id}`);
         const existing = await transaction.get(ref);
         if (existing.exists && existing.data().userId !== record.userId) throw new Error("Bu raqam boshqa Telegram hisobiga bog'langan. Superadmindan bog'lanishni uzishni so'rang.");
         transaction.set(ref, record);
@@ -50,12 +69,13 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
           await reply("Faqat o'zingizning telefon raqamingizni tugma orqali yuboring.");
         } else {
           const phone = normalizePhone(message.contact.phone_number);
-          const workers = (await finance()).workers.filter(w => normalizePhone(w.phone) === phone);
-          if (workers.length !== 1) await reply("Raqamingiz dasturda topilmadi yoki takrorlangan. Superadmin xodim kartasidagi raqamni tekshirsin, keyin /start bosing.");
+          const workers = (await accounts()).filter(w => normalizePhone(w.phone) === phone);
+          if (workers.length !== 1) await reply("Raqamingiz topilmadi yoki takrorlangan. Superadmin Admin va rollar boshqaruvidagi telefonni tekshirsin, keyin /start bosing.");
           else {
             try {
               await bind(workers[0], message);
-              await reply(`${workers[0].name}, muvaffaqiyatli bog'landingiz! Chat ID: ${message.chat.id}. Sizga belgilangan xabarlar shu yerga keladi.`, { remove_keyboard: true });
+              const roleNames = { worker: "Montajnik", designer: "Dizayner", manager: "Menejer", accountant: "Buxgalter", admin: "Admin", super_admin: "Superadmin", viewer: "Kuzatuvchi", client: "Mijoz" };
+              await reply(`${workers[0].username}, muvaffaqiyatli bog'landingiz! Lavozim: ${roleNames[workers[0].role] || workers[0].role}. Chat ID: ${message.chat.id}. ${workers[0].role === "worker" ? "Dizaynlar ruxsati berilganda faqat tasdiqlangan dizayn, o'lcham va montaj vazifasi keladi." : "Xabarlar sizga berilgan bo'lim ruxsatlariga qarab keladi."}`, { remove_keyboard: true });
             } catch (error) {
               // Binding conflicts are actionable; storage errors should be retried by Telegram.
               if (!error.message.includes("bog'langan")) throw error;
@@ -65,8 +85,8 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
         }
       } else if (/^\/start(?:@\w+)?(?:\s|$)/.test(message.text || "") || /Chat ID olish/.test(message.text || "")) {
         const all = await bindings();
-        const current = await finance();
-        const linked = all.find(b => b.userId === String(message.from.id) && current.workers.some(w => w.id === b.workerId && normalizePhone(w.phone) === b.phone));
+        const current = await accounts();
+        const linked = all.find(b => b.userId === String(message.from.id) && current.some(w => w.id === b.accountId && normalizePhone(w.phone) === b.phone));
         await reply(`Chat ID: ${message.chat.id}. ${linked ? "Hisobingiz bog'langan." : "Dasturdagi xodim hisobiga bog'lanish uchun telefon raqamingizni yuboring."}`,
           linked ? { remove_keyboard: true } : { keyboard: [[{ text: "Telefon raqamni yuborish", request_contact: true }]], resize_keyboard: true, one_time_keyboard: true });
       }
@@ -79,18 +99,18 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
 
   app.get("/api/telegram/staff", authRequired, superAdminRequired, async (_req, res) => {
     try {
-      const current = await finance();
+      const current = await accounts();
       const all = await bindings();
-      res.json({ workers: current.workers.map(worker => {
-        const connection = all.find(b => b.workerId === worker.id && b.phone === normalizePhone(worker.phone));
-        return { id: worker.id, name: worker.name, phone: worker.phone || "", chatId: connection?.chatId || "" };
+      res.json({ workers: current.map(worker => {
+        const connection = all.find(b => b.accountId === worker.id && b.phone === normalizePhone(worker.phone));
+        return { id: worker.id, name: worker.username, role: worker.role, phone: worker.phone || "", chatId: connection?.chatId || "" };
       }) });
     } catch (error) { res.status(503).json({ error: "Telegram bog'lanishlarini olishda xato." }); }
   });
   app.delete("/api/telegram/staff/:id", authRequired, superAdminRequired, async (req, res) => {
     try {
       const db = getFirestore();
-      if (db) await db.collection("telegramStaff").doc(req.params.id).delete();
+      if (db) await db.collection("telegramStaff").doc(`account-${req.params.id}`).delete();
       else memoryBindings.delete(req.params.id);
       res.json({ ok: true });
     } catch (error) { res.status(503).json({ error: "Bog'lanishni uzishda xato." }); }
@@ -106,10 +126,10 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
   });
 
   async function deliver(category, text, currentFinance, photo) {
-    const current = currentFinance || await finance();
+    const current = await accounts();
     const all = await bindings();
-    const recipients = [...new Set(current.workers.filter(w => (w.notifications || []).includes(category)).flatMap(w =>
-      all.filter(b => b.workerId === w.id && b.phone === normalizePhone(w.phone)).map(b => b.chatId)))];
+    const recipients = [...new Set(current.filter(w => canReceive(w, category) && normalizePhone(w.phone)).flatMap(w =>
+      all.filter(b => b.accountId === w.id && b.phone === normalizePhone(w.phone)).map(b => b.chatId)))];
     if (!recipients.length) return { sent: 0, failed: 0 };
     const results = await Promise.allSettled(recipients.map(chat_id => photo
       ? telegramApi("sendPhoto", { chat_id, photo, caption: text.slice(0, 1000) })
@@ -139,7 +159,7 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
     }
     return warnings;
   }
-  return { deliver, notifyChanges };
+  return { deliver, notifyChanges, finance };
 }
 
-module.exports = { normalizePhone, createTelegramStaff };
+module.exports = { normalizePhone, canReceive, createTelegramStaff };

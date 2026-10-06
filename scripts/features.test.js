@@ -27,7 +27,7 @@ test("permissions, MAX-equivalent payment and Telegram staff registration", asyn
   vm.runInNewContext(source, context, { filename: "server.js" });
   const store = context.global.__planetPrintMemoryStore;
   store.finance = { projects: [{ id: "p1", name: "Banner", amount: 1000, advance: 200 }], payments: [], workers: [{ id: "w1", name: "Ali", phone: "+998 90 123 45 67", notifications: ["payments", "designs"] }], payment: { currentMonth: now, lastPaidMonth: now } };
-  store.users.push({ id: "a1", username: "admin", role: "admin", permissions: JSON.stringify(["payments"]) });
+  store.users.push({ id: "a1", username: "admin", phone: "998901234567", role: "admin", permissions: JSON.stringify(["payments"]) });
   const server = context.module.exports.listen(0, "127.0.0.1");
   await new Promise(resolve => server.once("listening", resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
@@ -88,12 +88,74 @@ test("permissions, MAX-equivalent payment and Telegram staff registration", asyn
     assert.match(sent.at(-1).text, /To'lov/);
     const announcement = await request("/api/telegram/announcement", "POST", { text: "test" }, "fallback-super-admin");
     assert.equal(announcement.body.sent.sent, 0);
-    await request("/api/telegram/staff/w1", "DELETE", null, "fallback-super-admin");
+    await request("/api/telegram/staff/a1", "DELETE", null, "fallback-super-admin");
     result = await request("/api/telegram/staff", "GET", null, "fallback-super-admin");
     assert.equal(result.body.workers[0].chatId, "");
+  });
+  let installerId;
+  await t.test("account phone creation, editing, normalization and uniqueness", async () => {
+    const body = { username: "montaj", email: "test@example.invalid", password: "test-password", phone: "+998 91 111 22 33", role: "worker", permissions: ["designs", "payments", "settings"] };
+    assert.equal((await request("/api/users", "POST", body, "fallback-super-admin")).status, 200);
+    const users = (await request("/api/users", "GET", null, "fallback-super-admin")).body.users;
+    const installer = users.find(u => u.username === "montaj");
+    installerId = installer.id;
+    assert.equal(installer.phone, "998911112233");
+    assert.equal((await request("/api/users", "POST", { ...body, username: "duplicate", phone: "911112233" }, "fallback-super-admin")).status, 409);
+    assert.equal((await request(`/api/users/${installerId}`, "PUT", { role: "worker", permissions: ["designs"], phone: "901234567" }, "fallback-super-admin")).status, 409);
+    assert.equal((await request(`/api/users/${installerId}`, "PUT", { role: "worker", permissions: ["designs"], phone: "invalid123" }, "fallback-super-admin")).status, 400);
+  });
+  await t.test("installer gets only approved image with dimensions and task; draft and payment events stay hidden", async () => {
+    const installerMessage = { chat: { id: 456, type: "private" }, from: { id: 456 }, contact: { user_id: 456, phone_number: "911112233" } };
+    assert.equal((await webhook(installerMessage)).status, 200);
+    assert.match(sent.at(-1).text, /Montajnik/);
+    const before = sent.length;
+    let finance = (await request("/api/finance", "GET", null, "fallback-super-admin")).body.finance;
+    finance.designs.push({ id: "design1", projectId: "p1", photoFileId: "fake-photo-id", approved: false, note: "Fasadga o'rnatish" });
+    finance.payments[0].note = "Installer must not see this";
+    await request("/api/finance", "PUT", { finance }, "fallback-super-admin");
+    await request("/api/telegram/announcement", "POST", { text: "Not for installer" }, "fallback-super-admin");
+    assert.equal(sent.length, before);
+    assert.equal((await request("/api/telegram/send-design", "POST", { designId: "design1", approved: true, caption: "forged" }, "fallback-super-admin")).status, 400);
+    finance.designs[0].approved = true;
+    await request("/api/finance", "PUT", { finance }, "fallback-super-admin");
+    assert.equal((await request("/api/telegram/send-design", "POST", { designId: "design1" }, "fallback-super-admin")).status, 400);
+    finance.designs[0].dimensions = "200 x 100 sm, 2 dona";
+    await request("/api/finance", "PUT", { finance }, "fallback-super-admin");
+    assert.equal(sent.length, before);
+    const delivery = await request("/api/telegram/send-design", "POST", { designId: "design1" }, "fallback-super-admin");
+    assert.equal(delivery.status, 200);
+    assert.equal(delivery.body.delivery.sent, 1);
+    assert.equal(sent.at(-1).chat_id, "456");
+    assert.equal(sent.at(-1).photo, "fake-photo-id");
+    assert.match(sent.at(-1).caption, /200 x 100 sm, 2 dona/);
+    assert.match(sent.at(-1).caption, /Fasadga ornatish/);
+    assert.equal(sent.length, before + 1);
+    assert.equal((await request("/api/telegram/send-design", "POST", { designId: "design1" }, installerId)).status, 403);
+    // Current permissions, not those recorded at binding time, control delivery.
+    await request(`/api/users/${installerId}`, "PUT", { role: "worker", permissions: [] }, "fallback-super-admin");
+    assert.equal((await request("/api/telegram/send-design", "POST", { designId: "design1" }, "fallback-super-admin")).status, 502);
+    assert.equal(sent.length, before + 1);
+  });
+  await t.test("changing account phone disables the old Telegram binding", async () => {
+    await request(`/api/users/${installerId}`, "PUT", { role: "worker", permissions: ["designs"], phone: "+998 93 111 22 33" }, "fallback-super-admin");
+    const result = await request("/api/telegram/staff", "GET", null, "fallback-super-admin");
+    assert.equal(result.body.workers.find(w => w.id === installerId).chatId, "");
+    assert.equal((await request("/api/telegram/send-design", "POST", { designId: "design1" }, "fallback-super-admin")).status, 502);
   });
   await t.test("deleted users cannot reuse tokens", async () => {
     store.users.length = 0;
     assert.equal((await request("/api/finance")).status, 401);
   });
+});
+
+test("Telegram role and section policy", () => {
+  const { canReceive } = require("../telegram-staff");
+  assert.equal(canReceive({ role: "worker", permissions: ["designs", "payments", "settings"] }, "payments"), false);
+  assert.equal(canReceive({ role: "worker", permissions: ["designs"] }, "designs"), false);
+  assert.equal(canReceive({ role: "worker", permissions: ["designs"] }, "approved_designs"), true);
+  assert.equal(canReceive({ role: "designer", permissions: '["designs"]' }, "designs"), true);
+  assert.equal(canReceive({ role: "designer", permissions: ["designs"] }, "payments"), false);
+  assert.equal(canReceive({ role: "accountant", permissions: ["payments", "expenses"] }, "expenses"), true);
+  assert.equal(canReceive({ role: "manager", permissions: ["projects"] }, "projects"), true);
+  assert.equal(canReceive({ role: "admin", permissions: [] }, "payments"), false);
 });

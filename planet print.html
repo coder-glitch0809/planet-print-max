@@ -187,7 +187,7 @@
           <form id="workerForm">
             <div class="grid-3">
               <div><label for="wName">Ishchi ismi</label><input id="wName" required /></div>
-              <div><label for="wPhone">Telegram uchun telefon (+998...)</label><input id="wPhone" type="tel" placeholder="+998901234567" /></div><div class="worker-notifications"><label>Telegram xabarlari</label><label class="checkline"><input type="checkbox" data-notify="projects" />Zakazlar</label><label class="checkline"><input type="checkbox" data-notify="measurements" />O‘lchovlar</label><label class="checkline"><input type="checkbox" data-notify="designs" />Dizaynlar</label><label class="checkline"><input type="checkbox" data-notify="payments" />To‘lovlar</label><label class="checkline"><input type="checkbox" data-notify="expenses" />Xarajatlar</label><label class="checkline"><input type="checkbox" data-notify="announcements" />E’lonlar</label></div><div><label for="wRole">Lavozimi</label><input id="wRole" required /></div>
+              <div><label for="wPhone">Telefon (+998...)</label><input id="wPhone" type="tel" placeholder="+998901234567" /></div><div><label for="wRole">Lavozimi</label><input id="wRole" required /></div>
               <div><label for="wSalary">Oyligi (UZS)</label><input id="wSalary" inputmode="decimal" required /></div>
             </div>
             <div class="actions">
@@ -233,12 +233,13 @@
       <section id="designs" class="page">
         <div class="panel card design-panel">
           <h2 class="section-title">Tasdiqlangan dizaynni yuborish</h2>
-          <p class="section-help">Mijoz tasdiqlagan dizayn Telegramdagi montajchilar guruhiga yuboriladi.</p>
+          <p class="section-help">Tasdiqlangan dizayn rasmi, o‘lchamlari va bajariladigan ish Telegramga bog‘langan, Dizaynlar ruxsati bor foydalanuvchilarga yuboriladi.</p>
           <form id="designForm" class="form-grid">
             <div class="grid-3">
               <div><label for="designProject">Zakaz</label><select id="designProject" required></select></div>
               <div><label for="designImage">Dizayn rasmi</label><input id="designImage" type="file" accept="image/jpeg,image/png,image/webp" required /></div>
-              <div><label for="designNote">Montajchilarga izoh</label><input id="designNote" maxlength="400" placeholder="O'lcham, material yoki montaj bo'yicha izoh" /></div>
+              <div><label for="designDimensions">O‘lchamlari (birligi bilan)</label><input id="designDimensions" maxlength="100" required placeholder="Eni 200 sm × bo‘yi 100 sm, 2 dona" /></div>
+              <div><label for="designNote">Montajnik bajaradigan ish</label><input id="designNote" maxlength="400" required placeholder="Material, montaj manzili va nima qilish kerakligini yozing" /></div>
             </div>
             <label class="checkline"><input id="designApproved" type="checkbox" required /> Mijoz dizaynni tasdiqlagan</label>
             <div class="actions"><button id="designSubmitBtn" type="submit">Tasdiqlangan dizaynni yuborish</button></div>
@@ -425,10 +426,12 @@
             <div class="grid-3">
               <div><label for="uName">Login</label><input id="uName" maxlength="32" required /></div>
               <div><label for="uEmail">Email</label><input id="uEmail" type="email" maxlength="128" required /></div>
+              <div><label for="uPhone">Telegram uchun telefon raqami</label><input id="uPhone" type="tel" maxlength="24" autocomplete="tel" placeholder="+998 90 123 45 67" /></div>
               <div><label for="uPass">Parol</label><input id="uPass" type="password" maxlength="64" required /></div>
               <div><label for="uRole">Roli</label><select id="uRole"><option value="admin">Admin</option><option value="manager">Manager</option><option value="designer">Dizayner</option><option value="worker">Montajnik / Xodim</option><option value="accountant">Buxgalter</option><option value="viewer">Viewer</option><option value="client">Zakazchi</option></select></div>
             </div>
             <label class="checkline"><input id="uShowPass" type="checkbox" /> Parolni ko'rsatish</label>
+            <p class="section-help">Bot telefon orqali shu foydalanuvchiga bog‘lanadi. Xabarlar tanlangan bo‘lim ruxsatlariga qarab keladi. Montajnikka “Dizaynlar” ruxsatini bering: unga faqat tasdiqlangan rasm, o‘lchamlar va montaj vazifasi yuboriladi. Telefon kiritilmasa, bot xabari kelmaydi.</p>
             <div>
               <label>Mas’ul bo‘limlar (tanlangan bo‘limlarda ishlash huquqi; Viewer faqat ko‘radi)</label>
               <div class="perm-grid" id="permGrid"></div>
@@ -438,7 +441,7 @@
           </form>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Login</th><th>Role</th><th>Huquqlar</th><th>Amal</th></tr></thead>
+              <thead><tr><th>Login</th><th>Telefon</th><th>Role</th><th>Huquqlar</th><th>Amal</th></tr></thead>
               <tbody id="usersBody"></tbody>
             </table>
           </div>
@@ -461,11 +464,11 @@
         </div>
         <div class="panel card super-only">
           <h2 class="section-title">Telegram orqali ishchilarga xabar</h2>
-          <p class="section-help">Ishchilar bo‘limida telefon va xabar turlarini belgilang. Xodim botda /start bosib, o‘z telefonini bir marta yuboradi.</p>
+          <p class="section-help">Admin va rollar boshqaruvida telefon, lavozim va bo‘lim ruxsatlarini belgilang. Xodim botda /start bosib, o‘z telefonini bir marta yuboradi.</p>
           <div class="actions"><button id="telegramSetup" type="button">Botni ulash (webhook)</button><button id="telegramRefresh" type="button" class="ghost">Bog‘lanishlarni tekshirish</button></div>
           <div id="telegramStaffStatus" class="msg" aria-live="polite"></div>
           <div id="telegramStaffList"></div>
-          <p class="section-help">Xabar telefon orqali botga bog‘langan va E’lonlar xabari tanlangan xodimlarga yuboriladi.</p>
+          <p class="section-help">E’lon botga bog‘langan, Sozlamalar ruxsati bor foydalanuvchilarga yuboriladi. Montajnikka faqat tasdiqlangan montaj vazifasi boradi.</p>
           <form id="announcementForm" class="form-grid">
             <div><label for="announcementText">Xabar matni</label><textarea id="announcementText" rows="4" maxlength="3500" required placeholder="Platformadagi yangilik yoki ishchilar uchun e'lon"></textarea></div>
             <div class="actions"><button type="submit">Xodimlarga yuborish</button></div>

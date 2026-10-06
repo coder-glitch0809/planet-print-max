@@ -158,6 +158,7 @@ function publicUser(user) {
     id: user.id,
     username: user.username,
     role: user.role,
+    phone: normalizePhone(user.phone),
     permissions: safeJsonParse(user.permissions, []),
     createdAt: user.createdAt || Date.now()
   };
@@ -337,7 +338,7 @@ function visibleFinanceForUser(req, finance) {
           workers: visible.workers, founders: visible.founders, measurements: visible.measurements, designs: visible.designs };
       }) : [],
     measurements: canAccess(req, "measurements") ? full.measurements : [],
-    designs: canAccess(req, "projects") || canAccess(req, "designs") ? full.designs : [],
+    designs: canAccess(req, "projects") || canAccess(req, "designs") ? full.designs.filter(design => req.user.role !== "worker" || design.approved === true) : [],
     payment: full.payment,
     settings: canAccess(req, "settings") ? full.settings : { tax: 0, reserve: 0, other: 0 }
   };
@@ -366,7 +367,7 @@ function mergeFinanceForUser(req, currentFinance, incomingFinance) {
   if (canAccess(req, "founders")) next.founders = incoming.founders;
   if (canAccess(req, "expenses")) next.expenses = incoming.expenses;
   if (canAccess(req, "measurements")) next.measurements = incoming.measurements;
-  if (canAccess(req, "projects") || canAccess(req, "designs")) next.designs = incoming.designs;
+  if (req.user.role !== "worker" && (canAccess(req, "projects") || canAccess(req, "designs"))) next.designs = incoming.designs;
   if (canAccess(req, "settings")) next.settings = incoming.settings;
   next.archives = current.archives;
   next.payment = current.payment;
@@ -513,12 +514,6 @@ async function telegramApi(method, body, isForm = false) {
   return result.result;
 }
 
-function installersChatId() {
-  const chatId = String(process.env.TELEGRAM_INSTALLERS_CHAT_ID || "").trim();
-  if (!chatId) throw new Error("TELEGRAM_INSTALLERS_CHAT_ID sozlanmagan.");
-  return chatId;
-}
-
 function mediaChatId() {
   const chatId = String(process.env.TELEGRAM_MEDIA_CHAT_ID || "").trim();
   if (!chatId) throw new Error("TELEGRAM_MEDIA_CHAT_ID sozlanmagan; rasmlar uchun bot kiradigan yopiq media chat kerak.");
@@ -551,7 +546,7 @@ app.post("/api/telegram/upload-photo", authRequired, async (req, res) => {
     if (kind === "measurement" && !canAccess(req, "measurements")) return res.status(403).json({ error: "O'lchovlar huquqi kerak." });
     if (kind === "measurement" && ["viewer", "client"].includes(req.user.role)) return res.status(403).json({ error: "O'lchov rasmi yuklash huquqi yo'q." });
     if (kind === "design" && !canAccess(req, "designs") && !canAccess(req, "projects")) return res.status(403).json({ error: "Dizaynlar huquqi kerak." });
-    if (kind === "design" && (req.user.role === "viewer" || req.user.role === "client")) return res.status(403).json({ error: "Dizayn yuborish huquqi yo'q." });
+    if (kind === "design" && ["viewer", "client", "worker"].includes(req.user.role)) return res.status(403).json({ error: "Dizayn yuborish huquqi yo'q." });
     if (req.user.role !== "super_admin" && await paymentIsLockedForUser(req.user)) {
       return res.status(423).json({ error: "To'lov qilinmaguncha tizim yopiq." });
     }
@@ -577,24 +572,23 @@ app.post("/api/telegram/send-design", authRequired, async (req, res) => {
   try {
     if ((!canAccess(req, "designs") && !canAccess(req, "projects")) || ["viewer", "client", "worker"].includes(req.user.role)) return res.status(403).json({ error: "Dizayn yuborish huquqi yo'q." });
     if (req.user.role !== "super_admin" && await paymentIsLockedForUser(req.user)) return res.status(423).json({ error: "To'lov qilinmaguncha tizim yopiq." });
-    if (req.body?.approved !== true) return res.status(400).json({ error: "Tasdiqlangan dizayn ekanini belgilang." });
-    const fileId = String(req.body?.fileId || "");
-    const caption = sanitizeText(req.body?.caption, 900);
-    if (!fileId || !caption) return res.status(400).json({ error: "Dizayn fayli va izoh talab qilinadi." });
-    const delivery = await telegramStaff.deliver("designs", caption, undefined, fileId);
-    let messageId = null;
-    if (process.env.TELEGRAM_INSTALLERS_CHAT_ID) {
-      try {
-        const result = await telegramApi("sendPhoto", { chat_id: installersChatId(), photo: fileId, caption });
-        messageId = result.message_id;
-        delivery.sent++;
-      } catch (error) { delivery.failed++; }
-    }
-    if (!delivery.sent) throw new Error("Dizayn yuborilmadi. Xodim botga bog'langanini va Dizaynlar xabari yoqilganini tekshiring.");
-    res.json({ ok: true, messageId, delivery });
+    const finance = await telegramStaff.finance();
+    const design = finance.designs.find(item => item.id === req.body?.designId);
+    if (!design) return res.status(404).json({ error: "Saqlangan dizayn topilmadi." });
+    if (design.approved !== true) return res.status(400).json({ error: "Tasdiqlanmagan dizayn yuborilmaydi." });
+    const fileId = String(design.photoFileId || "");
+    const dimensions = sanitizeText(design.dimensions, 100);
+    const instruction = sanitizeText(design.note, 400);
+    if (!fileId || !dimensions || !instruction) return res.status(400).json({ error: "Dizayn rasmi, o'lchamlari va montaj vazifasini to'ldiring." });
+    const project = finance.projects.find(item => item.id === design.projectId);
+    if (!project) return res.status(400).json({ error: "Dizayn zakazi topilmadi." });
+    const caption = `TASDIQLANGAN DIZAYN — MONTAJ VAZIFASI\nZakaz: ${sanitizeText(project.name)}\nO'lcham: ${dimensions}\nBajariladigan ish: ${instruction}`;
+    const delivery = await telegramStaff.deliver("approved_designs", caption, undefined, fileId);
+    if (!delivery.sent) throw new Error("Dizayn yuborilmadi. Foydalanuvchi telefoni, Telegram bog'lanishi va Dizaynlar ruxsatini tekshiring.");
+    res.json({ ok: true, messageId: null, delivery });
   } catch (err) {
     console.error("Approved design Telegram delivery failed:", err.message);
-    res.status(502).json({ error: err.message || "Dizayn montajchilar guruhiga yuborilmadi." });
+    res.status(502).json({ error: err.message || "Dizayn foydalanuvchilarga yuborilmadi." });
   }
 });
 
@@ -916,11 +910,49 @@ app.get("/api/users", authRequired, superAdminRequired, async (_req, res) => {
   }
 });
 
+function parseAccountPhone(value) {
+  const raw = String(value || "").trim();
+  const phone = normalizePhone(raw);
+  if (raw && (!/^[+\d\s()-]+$/.test(raw) || !/^\d{10,15}$/.test(phone))) {
+    const error = new Error("Telefon raqamini davlat kodi bilan to'g'ri kiriting: +998901234567.");
+    error.status = 400;
+    throw error;
+  }
+  return phone;
+}
+
+function checkMemoryPhone(phone, id) {
+  if (phone && memoryStore.users.some(user => user.id !== id && normalizePhone(user.phone) === phone)) {
+    const error = new Error("Bu telefon raqami boshqa foydalanuvchiga berilgan.");
+    error.status = 409;
+    throw error;
+  }
+}
+
+async function saveFirestoreUser(id, changes) {
+  await firestore.runTransaction(async transaction => {
+    if (changes.phone) {
+      const samePhone = await transaction.get(firestore.collection("users").where("phone", "==", changes.phone));
+      if (samePhone.docs.some(doc => doc.id !== id)) {
+        const error = new Error("Bu telefon raqami boshqa foydalanuvchiga berilgan.");
+        error.status = 409;
+        throw error;
+      }
+    }
+    transaction.set(firestore.collection("users").doc(id), changes, { merge: true });
+  });
+}
+
 app.post("/api/users", authRequired, superAdminRequired, async (req, res) => {
   const username = sanitizeText(req.body?.username, 32);
   const password = String(req.body?.password || "");
   const role = sanitizeText(req.body?.role, 20);
   const permissions = Array.isArray(req.body?.permissions) ? req.body.permissions.filter(x => FINANCE_PERMS.includes(x)) : [];
+  let phone;
+  try {
+    phone = parseAccountPhone(req.body?.phone);
+    checkMemoryPhone(phone);
+  } catch (error) { return res.status(error.status || 503).json({ error: error.message }); }
 
   if (!username || password.length < 8) return res.status(400).json({ error: "Invalid credentials" });
   if (!["admin", "manager", "designer", "worker", "accountant", "viewer", "client"].includes(role)) return res.status(400).json({ error: "Invalid role" });
@@ -944,9 +976,10 @@ app.post("/api/users", authRequired, superAdminRequired, async (req, res) => {
     }
 
     await withTimeout(
-      firestore.collection("users").doc(id).set({
+      saveFirestoreUser(id, {
         username,
         email,
+        phone,
         passHash,
         role,
         permissions: JSON.stringify(permissions),
@@ -958,6 +991,7 @@ app.post("/api/users", authRequired, superAdminRequired, async (req, res) => {
 
     return res.json({ ok: true, storage: "firebase" });
   } catch (err) {
+    if (firestore) return res.status(err.status || 503).json({ error: err.status ? err.message : "Foydalanuvchini bazaga saqlab bo'lmadi. Qayta urinib ko'ring." });
     console.error("Create user fallback mode:", err.message);
   }
 
@@ -969,6 +1003,7 @@ app.post("/api/users", authRequired, superAdminRequired, async (req, res) => {
     id,
     username,
     email,
+    phone,
     passHash,
     role,
     permissions: JSON.stringify(permissions),
@@ -996,15 +1031,17 @@ app.put("/api/users/:id", authRequired, superAdminRequired, async (req, res) => 
         !Array.isArray(permissions) || permissions.some(p => !FINANCE_PERMS.includes(p))) {
       return res.status(400).json({ error: "Rol yoki huquqlar noto'g'ri." });
     }
-    const changes = { role, permissions: JSON.stringify([...new Set(permissions)]) };
+    const phone = parseAccountPhone(req.body.phone === undefined ? user.phone : req.body.phone);
+    checkMemoryPhone(phone, id);
+    const changes = { role, phone, permissions: JSON.stringify([...new Set(permissions)]) };
     if (req.body.password) {
       if (String(req.body.password).length < 8) return res.status(400).json({ error: "Parol kamida 8 belgi." });
       changes.passHash = await bcrypt.hash(String(req.body.password), 10);
     }
     if (memoryUser) Object.assign(memoryUser, changes);
-    else await withTimeout(ref.update(changes), 10000);
+    else await withTimeout(saveFirestoreUser(id, changes), 10000);
     res.json({ ok: true });
-  } catch (err) { res.status(503).json({ error: err.message }); }
+  } catch (err) { res.status(err.status || 503).json({ error: err.message }); }
 });
 
 app.delete("/api/users/:id", authRequired, superAdminRequired, async (req, res) => {
