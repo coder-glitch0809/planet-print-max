@@ -901,3 +901,7 @@ textarea:focus { outline: 2px solid color-mix(in srgb, var(--brand) 30%, transpa
   }
   .page.active > .panel.card:first-child { padding: 15px; }
 }
+.amount-with-max { display: flex; gap: 8px; align-items: center; }
+.amount-with-max input { min-width: 0; flex: 1; }
+.amount-with-max button { flex-shrink: 0; }
+.worker-notifications .checkline { margin: 4px 0; }

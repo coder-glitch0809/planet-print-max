@@ -276,7 +276,8 @@ const TOKEN_KEY = "pp_token_v1";
     }
     async function saveFinance() {
       try {
-        await apiRequest("/api/finance", { method: "PUT", body: JSON.stringify({ finance: state.finance }) });
+        const result = await apiRequest("/api/finance", { method: "PUT", body: JSON.stringify({ finance: state.finance }) });
+        if (result.warnings?.length) msg(el.announcementMsg, result.warnings.join(" "), "warn");
         return true;
       } catch (e) {
         console.error("Server save finance error:", e);
@@ -295,6 +296,7 @@ const TOKEN_KEY = "pp_token_v1";
     function defaultPermsByRole(role) {
       if (role === "admin") return ["dashboard", "projects", "workers", "founders", "expenses", "payments", "reports", "measurements", "settings"];
       if (role === "manager") return ["dashboard", "projects", "designs", "workers", "founders", "expenses", "payments", "reports", "measurements"];
+      if (role === "accountant") return ["payments", "expenses", "reports"];
       if (role === "designer") return ["designs"];
       if (role === "worker") return ["measurements"];
       if (role === "client") return ["projects"];
@@ -303,8 +305,8 @@ const TOKEN_KEY = "pp_token_v1";
     function hasPerm(page) {
       if (!state.currentUser) return false;
       if (state.currentUser.role === "super_admin") return true;
-      if (state.currentUser.role === "admin" && ALL_PERMS.includes(page)) return true;
-      if (state.currentUser.role === "manager" && page === "measurements") return true;
+      
+      
       return (state.currentUser.permissions || []).includes(page);
     }
     function isSuperAdmin() {
@@ -354,15 +356,16 @@ const TOKEN_KEY = "pp_token_v1";
       drawCharts();
     }
 
-    function renderPermGrid() {
-      el.permGrid.innerHTML = ALL_PERMS.map((p) => `<label class="perm-item"><input type="checkbox" data-perm="${p}" checked /> ${PAGE_TITLES[p]}</label>`).join("");
+    let editingUserId = null;
+    function renderPermGrid(selected = defaultPermsByRole(el.uRole.value)) {
+      el.permGrid.innerHTML = ALL_PERMS.map((p) => `<label class="perm-item"><input type="checkbox" data-perm="${p}" ${selected.includes(p) ? "checked" : ""} /> ${PAGE_TITLES[p]}</label>`).join("");
     }
     function renderTabs() {
       const base = ["dashboard", "projects", "designs", "payments", "workers", "measurements", "founders", "expenses", "reports", "archive", "settings"];
       const visible = base.filter((page) => page === "payments"
-        ? hasPerm("projects")
+        ? hasPerm("payments") && !["viewer", "client"].includes(state.currentUser.role)
         : page === "reports"
-          ? hasPerm("dashboard")
+          ? hasPerm("reports")
           : page === "designs" ? hasPerm("designs") || canEditProjects() : hasPerm(page));
       if (!isClientUser() && !visible.includes("archive") && (isSuperAdmin() || hasPerm("dashboard") || hasPerm("projects") || hasPerm("expenses"))) visible.splice(Math.max(visible.length - 1, 0), 0, "archive");
       if (state.currentUser.role === "super_admin") visible.splice(visible.length - 1, 0, "users");
@@ -721,7 +724,7 @@ const TOKEN_KEY = "pp_token_v1";
         const paid = paidMap[w.id] || 0;
         const remain = Math.max(num(w.salary) - av - paid, 0);
         return `<tr>
-          <td>${clean(w.name)}</td><td>${clean(w.role)}</td><td>${fmt(w.salary)}</td><td>${fmt(av)}</td><td>${fmt(paid)}</td><td>${fmt(remain)}</td>
+          <td>${clean(w.name)}<br><small>${clean(w.phone || "Telefon kiritilmagan")}</small></td><td>${clean(w.role)}</td><td>${fmt(w.salary)}</td><td>${fmt(av)}</td><td>${fmt(paid)}</td><td>${fmt(remain)}</td>
           <td>
             <button class="ghost small-btn" type="button" data-edit-w="${w.id}">Tahrirlash</button>
             <button class="danger small-btn" type="button" data-del-w="${w.id}">O'chirish</button>
@@ -736,6 +739,8 @@ const TOKEN_KEY = "pp_token_v1";
       Array.from(el.workersBody.querySelectorAll("[data-edit-w]")).forEach((b) => b.addEventListener("click", () => {
         const w = state.finance.workers.find(x => x.id === b.getAttribute("data-edit-w")); if (!w) return;
         editState.workerId = w.id;
+        document.getElementById("wPhone").value = w.phone || "";
+        document.querySelectorAll("[data-notify]").forEach(i => { i.checked = (w.notifications || []).includes(i.dataset.notify); });
         el.wName.value = w.name; el.wRole.value = w.role; el.wSalary.value = w.salary;
         setFormEditMode(el.workerForm, el.workerSubmitBtn, el.workerCancelEdit, true);
       }));
@@ -1000,10 +1005,16 @@ const TOKEN_KEY = "pp_token_v1";
         const payment = state.finance.payments.find(item => item.id === button.getAttribute("data-delete-payment"));
         if (!payment) return;
         const project = state.finance.projects.find(item => item.id === payment.projectId);
+        const previousAdvance = project?.advance;
+        const previousPayments = [...state.finance.payments];
         if (project) project.advance = Math.max(num(project.advance) - num(payment.amount), 0);
         state.finance.payments = state.finance.payments.filter(item => item.id !== payment.id);
         const saved = await saveFinance();
-        if (!saved) return msg(el.paymentMsg, "To'lovni o'chirishda saqlash xatosi yuz berdi.", "err");
+        if (!saved) {
+          if (project) project.advance = previousAdvance;
+          state.finance.payments = previousPayments;
+          return msg(el.paymentMsg, "To'lovni o'chirishda saqlash xatosi yuz berdi.", "err");
+        }
         refreshAll();
       }));
     }
@@ -1420,9 +1431,22 @@ const TOKEN_KEY = "pp_token_v1";
     function renderUsersTable() {
       if (state.currentUser.role !== "super_admin") { el.usersBody.innerHTML = `<tr><td colspan="4">Faqat super admin ko'ra oladi.</td></tr>`; return; }
       el.usersBody.innerHTML = state.users.map((u) => `<tr>
-        <td>${clean(u.username)}</td><td>${clean(u.role)}</td><td>${(u.permissions || []).join(", ") || "-"}</td>
-        <td>${u.role === "super_admin" ? "-" : `<button class="danger small-btn" type="button" data-del-u="${u.id}">O'chirish</button>`}</td>
+        <td>${clean(u.username)}</td><td>${clean(u.role)}</td><td>${(u.permissions || []).map(p => clean(PAGE_TITLES[p] || p)).join(", ") || "-"}</td>
+        <td>${u.role === "super_admin" ? "-" : `<button class="small-btn" type="button" data-edit-u="${clean(u.id)}">Tahrirlash</button> <button class="danger small-btn" type="button" data-del-u="${u.id}">O'chirish</button>`}</td>
       </tr>`).join("");
+      el.usersBody.querySelectorAll("[data-edit-u]").forEach(button => button.addEventListener("click", () => {
+        const user = state.users.find(u => u.id === button.dataset.editU);
+        editingUserId = user.id;
+        el.uName.value = user.username; el.uName.disabled = true;
+        el.uEmail.required = false; el.uEmail.disabled = true;
+        el.uPass.value = ""; el.uPass.required = false;
+        el.uPass.placeholder = "O'zgartirish uchun yangi parol";
+        el.uRole.value = user.role;
+        renderPermGrid(user.permissions || []);
+        el.userForm.querySelector('[type="submit"]').textContent = "O'zgarishlarni saqlash";
+        document.getElementById("userCancelEdit").classList.remove("hidden");
+        el.userForm.scrollIntoView({ behavior: "smooth" });
+      }));
       Array.from(el.usersBody.querySelectorAll("[data-del-u]")).forEach((b) => b.addEventListener("click", () => {
         const id = b.getAttribute("data-del-u");
         apiRequest(`/api/users/${id}`, { method: "DELETE" })
@@ -1696,6 +1720,25 @@ const TOKEN_KEY = "pp_token_v1";
           el.measurementSubmitBtn.disabled = false;
         }
       });
+      const refreshTelegramStaff = async () => {
+        const status = document.getElementById("telegramStaffStatus");
+        try {
+          const result = await apiRequest("/api/telegram/staff");
+          document.getElementById("telegramStaffList").innerHTML = result.workers.map(w => `<p>${clean(w.name)} — ${clean(w.phone || "Telefon yo'q")} — ${w.chatId ? `Chat ID: ${clean(w.chatId)} <button type="button" class="ghost small-btn" data-unlink-worker="${clean(w.id)}">Bog'lanishni uzish</button>` : "Botga bog'lanmagan"}</p>`).join("");
+          document.querySelectorAll("[data-unlink-worker]").forEach(button => button.addEventListener("click", async () => {
+            try { await apiRequest(`/api/telegram/staff/${encodeURIComponent(button.dataset.unlinkWorker)}`, { method: "DELETE" }); await refreshTelegramStaff(); }
+            catch (error) { msg(status, error.message, "err"); }
+          }));
+          msg(status, `${result.workers.filter(w => w.chatId).length} / ${result.workers.length} xodim bog'langan.`, "ok");
+        } catch (error) { msg(status, error.message, "err"); }
+      };
+      document.getElementById("telegramRefresh").addEventListener("click", refreshTelegramStaff);
+      document.getElementById("telegramSetup").addEventListener("click", async () => {
+        try {
+          await apiRequest("/api/telegram/setup-webhook", { method: "POST", body: "{}" });
+          msg(document.getElementById("telegramStaffStatus"), "Bot ulandi. Endi xodimlar /start bosishi mumkin.", "ok");
+        } catch (error) { msg(document.getElementById("telegramStaffStatus"), error.message, "err"); }
+      });
       el.announcementForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         try {
@@ -1705,7 +1748,7 @@ const TOKEN_KEY = "pp_token_v1";
           });
           if (result.ok) {
             el.announcementForm.reset();
-            msg(el.announcementMsg, "E'lon montajchilar guruhiga yuborildi.", "ok");
+            msg(el.announcementMsg, `Yuborildi: ${result.sent.sent}. Yuborilmadi: ${result.sent.failed}.${result.sent.sent === 0 ? " Xodim telefoni, bog'lanishi va xabar sozlamalarini tekshiring." : ""}`, result.sent.failed || !result.sent.sent ? "warn" : "ok");
           }
         } catch (err) {
           msg(el.announcementMsg, err.message || "E'lon yuborilmadi.", "err");
@@ -1800,6 +1843,12 @@ const TOKEN_KEY = "pp_token_v1";
       el.projectCancelEdit.addEventListener("click", resetProjectForm);
       el.projectReset.addEventListener("click", resetProjectForm);
 
+      document.getElementById("paymentMax").addEventListener("click", () => {
+        const project = state.finance.projects.find(p => p.id === el.paymentProjectId.value);
+        el.paymentAmount.value = project ? Math.max(num(project.amount) - num(project.advance), 0) : "";
+        msg(el.paymentMsg, "Qolgan summa kiritildi. To'lovni saqlash tugmasini bosing.", "ok");
+      });
+      el.paymentProjectId.addEventListener("change", () => { el.paymentAmount.value = ""; });
       el.paymentForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         if (blockIfPaymentLocked(el.paymentMsg)) return;
@@ -1828,14 +1877,18 @@ const TOKEN_KEY = "pp_token_v1";
         refreshAll();
       });
 
-      el.workerForm.addEventListener("submit", (e) => {
+      el.workerForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         if (blockIfPaymentLocked(el.workerMsg)) return;
-        const rec = { id: editState.workerId || uid(), name: clean(el.wName.value), role: clean(el.wRole.value), salary: num(el.wSalary.value) };
+        const rec = { id: editState.workerId || uid(), phone: document.getElementById("wPhone").value.replace(/\D/g, ""), notifications: Array.from(document.querySelectorAll("[data-notify]:checked")).map(i => i.dataset.notify), name: clean(el.wName.value), role: clean(el.wRole.value), salary: num(el.wSalary.value) };
         if (!rec.name || !rec.role || rec.salary <= 0) return msg(el.workerMsg, "Ma'lumotlarni to'g'ri kiriting.", "err");
+        const previousWorkers = [...state.finance.workers];
+        const phoneKey = value => { const digits = String(value || "").replace(/\D/g, ""); return digits.length === 9 ? `998${digits}` : digits; };
+        if (rec.phone && (!/^\d{9,15}$/.test(rec.phone) || previousWorkers.some(w => w.id !== rec.id && phoneKey(w.phone) === phoneKey(rec.phone)))) return msg(el.workerMsg, "Telefon noto'g'ri yoki boshqa xodimda ishlatilgan.", "err");
         if (editState.workerId) state.finance.workers = state.finance.workers.map(w => w.id === rec.id ? rec : w);
         else state.finance.workers.unshift(rec);
-        saveFinance(); resetWorkerForm(); msg(el.workerMsg, "Ishchi saqlandi.", "ok"); refreshAll();
+        if (!await saveFinance()) { state.finance.workers = previousWorkers; return msg(el.workerMsg, "Xodim saqlanmadi. Qayta urinib ko'ring.", "err"); }
+        resetWorkerForm(); msg(el.workerMsg, "Ishchi saqlandi.", "ok"); refreshAll();
       });
       el.workerCancelEdit.addEventListener("click", resetWorkerForm);
       el.workerReset.addEventListener("click", () => { el.workerForm.reset(); msg(el.workerMsg, "", ""); });
@@ -1915,24 +1968,32 @@ const TOKEN_KEY = "pp_token_v1";
         resetExpenseForm();
       });
 
+      el.uRole.addEventListener("change", () => renderPermGrid());
+      const resetUserEditor = () => {
+        editingUserId = null; el.userForm.reset();
+        el.uName.disabled = false; el.uEmail.disabled = false; el.uEmail.required = true;
+        el.uPass.required = true; el.uPass.placeholder = "";
+        el.userForm.querySelector('[type="submit"]').textContent = "Foydalanuvchi qo'shish";
+        document.getElementById("userCancelEdit").classList.add("hidden"); renderPermGrid();
+      };
+      document.getElementById("userCancelEdit").addEventListener("click", resetUserEditor);
       el.userForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         if (state.currentUser.role !== "super_admin") return msg(el.userMsg, "Faqat super admin qo'sha oladi.", "err");
         const username = clean(el.uName.value), password = el.uPass.value, role = clean(el.uRole.value);
-        if (!username || password.length < 8) return msg(el.userMsg, "Login kiriting, parol kamida 8 belgi.", "err");
+        if (!username || ((!editingUserId || password) && password.length < 8)) return msg(el.userMsg, "Login kiriting, parol kamida 8 belgi.", "err");
         const checks = Array.from(el.permGrid.querySelectorAll("input[data-perm]:checked")).map(i => i.getAttribute("data-perm"));
-        const permissions = role === "admin" ? checks : defaultPermsByRole(role);
+        const permissions = checks;
         try {
           // Create user via server API (uses admin SDK)
           const token = localStorage.getItem(TOKEN_KEY);
           const email = (el.uEmail && el.uEmail.value) ? el.uEmail.value.trim() : '';
-          const resp = await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': token ? `Bearer ${token}` : '' }, body: JSON.stringify({ username, email, password, role, permissions }) });
+          const resp = await fetch(editingUserId ? `/api/users/${editingUserId}` : '/api/users', { method: editingUserId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': token ? `Bearer ${token}` : '' }, body: JSON.stringify({ username, email, password, role, permissions }) });
           const j = await resp.json().catch(() => ({}));
           if (!resp.ok) return msg(el.userMsg, j.error || 'Foydalanuvchi yaratishda xatolik', 'err');
           await loadUsers();
-          el.userForm.reset();
-          renderPermGrid();
-          msg(el.userMsg, 'Foydalanuvchi qo\'shildi.', 'ok');
+          resetUserEditor();
+          msg(el.userMsg, "Foydalanuvchi saqlandi.", "ok");
           renderUsersTable();
         } catch (err) {
           msg(el.userMsg, err.message || String(err), 'err');

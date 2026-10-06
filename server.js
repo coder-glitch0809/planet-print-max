@@ -271,8 +271,6 @@ function addPaymentLockInfo(finance) {
 
 function canAccess(req, perm) {
   if (req.user?.role === "super_admin") return true;
-  if (req.user?.role === "admin" && FINANCE_PERMS.includes(perm)) return true;
-  if (req.user?.role === "manager" && perm === "measurements") return true;
   const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
   return permissions.includes(perm);
 }
@@ -324,14 +322,20 @@ function visibleFinanceForUser(req, finance) {
     };
   }
   return {
-    projects: canAccess(req, "projects") || canAccess(req, "dashboard")
+    projects: canAccess(req, "projects") || canAccess(req, "dashboard") || canAccess(req, "payments") || canAccess(req, "reports")
       ? full.projects
       : canAccess(req, "designs") ? full.projects.map(designerProjectView) : [],
     workers: canAccess(req, "workers") ? full.workers : [],
     founders: canAccess(req, "founders") ? full.founders : [],
-    expenses: canAccess(req, "expenses") ? full.expenses : [],
-    payments: canAccess(req, "projects") ? full.payments : [],
-    archives: canAccess(req, "dashboard") || canAccess(req, "projects") || canAccess(req, "expenses") || canAccess(req, "reports") ? full.archives : [],
+    expenses: canAccess(req, "expenses") || canAccess(req, "reports") ? full.expenses : [],
+    payments: canAccess(req, "payments") || canAccess(req, "reports") ? full.payments : [],
+    archives: canAccess(req, "dashboard") || canAccess(req, "projects") || canAccess(req, "expenses") || canAccess(req, "reports")
+      ? full.archives.map(archive => {
+        const visible = visibleFinanceForUser(req, { ...archive, archives: [] });
+        return { id: archive.id, month: archive.month, archivedAt: archive.archivedAt,
+          projects: visible.projects, expenses: visible.expenses, payments: visible.payments,
+          workers: visible.workers, founders: visible.founders, measurements: visible.measurements, designs: visible.designs };
+      }) : [],
     measurements: canAccess(req, "measurements") ? full.measurements : [],
     designs: canAccess(req, "projects") || canAccess(req, "designs") ? full.designs : [],
     payment: full.payment,
@@ -343,11 +347,21 @@ function mergeFinanceForUser(req, currentFinance, incomingFinance) {
   const current = normalizeFinance(currentFinance);
   const incoming = normalizeFinance(incomingFinance);
   if (req.user?.role === "super_admin") return incoming;
-  if (req.user?.role === "client") return current;
+  if (["client", "viewer"].includes(req.user?.role)) return current;
 
   const next = { ...current };
   if (canAccess(req, "projects")) next.projects = incoming.projects;
-  if (canAccess(req, "projects")) next.payments = incoming.payments;
+  if (canAccess(req, "payments")) {
+    next.payments = incoming.payments;
+    if (!canAccess(req, "projects")) next.projects = current.projects.map(project => {
+      const updated = incoming.projects.find(item => item.id === project.id);
+      return updated ? { ...project, advance: updated.advance } : project;
+    });
+  }
+  if (canAccess(req, "projects") && !canAccess(req, "payments")) {
+    const newIds = new Set(next.projects.filter(p => !current.projects.some(old => old.id === p.id)).map(p => p.id));
+    next.payments = [...current.payments, ...incoming.payments.filter(p => newIds.has(p.projectId))];
+  }
   if (canAccess(req, "workers")) next.workers = incoming.workers;
   if (canAccess(req, "founders")) next.founders = incoming.founders;
   if (canAccess(req, "expenses")) next.expenses = incoming.expenses;
@@ -357,6 +371,26 @@ function mergeFinanceForUser(req, currentFinance, incomingFinance) {
   next.archives = current.archives;
   next.payment = current.payment;
   return next;
+}
+
+function validateFinanceChanges(current, next) {
+  if (new Set(next.payments.map(p => p.id)).size !== next.payments.length) return "To'lov identifikatori takrorlangan.";
+  const phones = next.workers.map(w => normalizePhone(w.phone)).filter(Boolean);
+  if (new Set(phones).size !== phones.length) return "Xodim telefon raqami takrorlangan.";
+  if (next.workers.some(w => w.phone && !/^\d{9,15}$/.test(normalizePhone(w.phone)))) return "Telefon raqami noto'g'ri.";
+  for (const project of next.projects) {
+    if (!Number.isFinite(Number(project.amount)) || !Number.isFinite(Number(project.advance)) ||
+        Number(project.amount) < 0 || Number(project.advance) < 0 || Number(project.advance) > Number(project.amount)) return "Zakaz to'lov summasi noto'g'ri.";
+    const previous = current.projects.find(p => p.id === project.id);
+    if (previous) {
+      const total = rows => rows.filter(p => p.projectId === project.id).reduce((sum, p) => sum + Number(p.amount), 0);
+      if (Math.abs((Number(project.advance) - Number(previous.advance)) - (total(next.payments) - total(current.payments))) > 0.01) return "Zakaz qoldig'i to'lov yozuvlariga mos emas.";
+    }
+  }
+  for (const payment of next.payments) {
+    if (!Number.isFinite(Number(payment.amount)) || Number(payment.amount) <= 0) return "To'lov summasi noto'g'ri.";
+  }
+  return "";
 }
 
 function validateNewExpenseAllocations(currentFinance, nextFinance) {
@@ -408,12 +442,20 @@ async function findMemoryUser(login, password) {
   return ok ? user : null;
 }
 
-function authRequired(req, res, next) {
+async function authRequired(req, res, next) {
   const auth = req.headers.authorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   if (!token) return res.status(401).json({ error: "Unauthorized" });
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
+    const claims = jwt.verify(token, JWT_SECRET);
+    let user = memoryStore.users.find(item => item.id === claims.id);
+    if (claims.id === "fallback-super-admin") user = fallbackAdminUser();
+    if (!user && firestore) {
+      const doc = await withTimeout(firestore.collection("users").doc(claims.id).get(), 10000);
+      if (doc.exists) user = { id: doc.id, ...doc.data() };
+    }
+    if (!user) return res.status(401).json({ error: "User not found" });
+    req.user = publicUser(user);
     next();
   } catch {
     res.status(401).json({ error: "Invalid token" });
@@ -499,6 +541,10 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, now: new Date().toISOString(), db: !!firestore, fallback: !!dbInitError });
 });
 
+const { normalizePhone, createTelegramStaff } = require("./telegram-staff");
+const telegramStaff = createTelegramStaff({ app, authRequired, superAdminRequired, telegramApi,
+  getFirestore: () => firestore, memoryStore, normalizeFinance });
+
 app.post("/api/telegram/upload-photo", authRequired, async (req, res) => {
   try {
     const kind = req.body?.kind === "measurement" ? "measurement" : "design";
@@ -535,12 +581,17 @@ app.post("/api/telegram/send-design", authRequired, async (req, res) => {
     const fileId = String(req.body?.fileId || "");
     const caption = sanitizeText(req.body?.caption, 900);
     if (!fileId || !caption) return res.status(400).json({ error: "Dizayn fayli va izoh talab qilinadi." });
-    const result = await telegramApi("sendPhoto", {
-      chat_id: installersChatId(),
-      photo: fileId,
-      caption
-    });
-    res.json({ ok: true, messageId: result.message_id });
+    const delivery = await telegramStaff.deliver("designs", caption, undefined, fileId);
+    let messageId = null;
+    if (process.env.TELEGRAM_INSTALLERS_CHAT_ID) {
+      try {
+        const result = await telegramApi("sendPhoto", { chat_id: installersChatId(), photo: fileId, caption });
+        messageId = result.message_id;
+        delivery.sent++;
+      } catch (error) { delivery.failed++; }
+    }
+    if (!delivery.sent) throw new Error("Dizayn yuborilmadi. Xodim botga bog'langanini va Dizaynlar xabari yoqilganini tekshiring.");
+    res.json({ ok: true, messageId, delivery });
   } catch (err) {
     console.error("Approved design Telegram delivery failed:", err.message);
     res.status(502).json({ error: err.message || "Dizayn montajchilar guruhiga yuborilmadi." });
@@ -548,7 +599,7 @@ app.post("/api/telegram/send-design", authRequired, async (req, res) => {
 });
 
 app.get("/api/telegram/photo/:fileId", authRequired, async (req, res) => {
-  if (!canAccess(req, "measurements") && !canAccess(req, "projects")) return res.status(403).json({ error: "Rasmni ko'rish huquqi yo'q." });
+  if (!canAccess(req, "measurements") && !canAccess(req, "projects") && !canAccess(req, "designs")) return res.status(403).json({ error: "Rasmni ko'rish huquqi yo'q." });
   const fileId = String(req.params.fileId || "");
   if (!/^[A-Za-z0-9_-]{10,512}$/.test(fileId)) return res.status(400).json({ error: "Rasm identifikatori noto'g'ri." });
   try {
@@ -569,8 +620,8 @@ app.post("/api/telegram/announcement", authRequired, superAdminRequired, async (
   const text = sanitizeText(req.body?.text, 3500);
   if (!text) return res.status(400).json({ error: "E'lon matnini kiriting." });
   try {
-    const result = await telegramApi("sendMessage", { chat_id: installersChatId(), text });
-    res.json({ ok: true, messageId: result.message_id });
+    const result = await telegramStaff.deliver("announcements", text);
+    res.json({ ok: true, sent: result });
   } catch (err) {
     console.error("Telegram announcement failed:", err.message);
     res.status(502).json({ error: err.message || "E'lon Telegramga yuborilmadi." });
@@ -792,10 +843,11 @@ app.put("/api/finance", authRequired, async (req, res) => {
       return res.status(423).json({ error: "To'lov sanasi. Super admin to'lov qilindi deb belgilamaguncha tizim yopiq." });
     }
     const mergedFinance = mergeFinanceForUser(req, current, finance);
-    const allocationError = validateNewExpenseAllocations(current, mergedFinance);
+    const allocationError = validateFinanceChanges(current, mergedFinance) || validateNewExpenseAllocations(current, mergedFinance);
     if (allocationError) return res.status(400).json({ error: allocationError });
     memoryStore.finance = mergedFinance;
-    return res.json({ ok: true, storage: "memory" });
+    const warnings = await telegramStaff.notifyChanges(current, mergedFinance);
+    return res.json({ ok: true, storage: "memory", warnings });
   }
   const financeDoc = await firestore.collection("settings").doc("finance").get();
   const financeData = financeDoc.exists ? financeDoc.data() : { data: DEFAULT_FINANCE };
@@ -806,14 +858,15 @@ app.put("/api/finance", authRequired, async (req, res) => {
     return res.status(423).json({ error: "To'lov sanasi. Super admin to'lov qilindi deb belgilamaguncha tizim yopiq." });
   }
   const mergedFinance = mergeFinanceForUser(req, currentFinance, finance);
-  const allocationError = validateNewExpenseAllocations(currentFinance, mergedFinance);
+  const allocationError = validateFinanceChanges(currentFinance, mergedFinance) || validateNewExpenseAllocations(currentFinance, mergedFinance);
   if (allocationError) return res.status(400).json({ error: allocationError });
   
   await firestore.collection("settings").doc("finance").set({
     data: normalizeFinance(mergedFinance),
     updatedAt: admin.firestore.FieldValue.serverTimestamp()
   });
-  res.json({ ok: true });
+  const warnings = await telegramStaff.notifyChanges(currentFinance, mergedFinance);
+  res.json({ ok: true, warnings });
 });
 
 app.post("/api/payment/mark-paid", authRequired, superAdminRequired, async (_req, res) => {
@@ -867,10 +920,10 @@ app.post("/api/users", authRequired, superAdminRequired, async (req, res) => {
   const username = sanitizeText(req.body?.username, 32);
   const password = String(req.body?.password || "");
   const role = sanitizeText(req.body?.role, 20);
-  const permissions = Array.isArray(req.body?.permissions) ? req.body.permissions.map(x => sanitizeText(x, 30)).filter(Boolean) : [];
+  const permissions = Array.isArray(req.body?.permissions) ? req.body.permissions.filter(x => FINANCE_PERMS.includes(x)) : [];
 
   if (!username || password.length < 8) return res.status(400).json({ error: "Invalid credentials" });
-  if (!["admin", "manager", "designer", "worker", "viewer", "client"].includes(role)) return res.status(400).json({ error: "Invalid role" });
+  if (!["admin", "manager", "designer", "worker", "accountant", "viewer", "client"].includes(role)) return res.status(400).json({ error: "Invalid role" });
 
   const passHash = await bcrypt.hash(password, 10);
   const id = Math.random().toString(36).slice(2, 10);
@@ -927,6 +980,31 @@ app.post("/api/users", authRequired, superAdminRequired, async (req, res) => {
     storage: "memory",
     warning: "Firebase ishlamagani uchun foydalanuvchi vaqtinchalik server xotirasida saqlandi. Vercel redeploy/cold startdan keyin yo'qolishi mumkin."
   });
+});
+
+app.put("/api/users/:id", authRequired, superAdminRequired, async (req, res) => {
+  try {
+    const id = sanitizeText(req.params.id, 40);
+    const memoryUser = memoryStore.users.find(user => user.id === id);
+    const ref = !memoryUser && firestore ? firestore.collection("users").doc(id) : null;
+    const doc = ref ? await withTimeout(ref.get(), 10000) : null;
+    const user = memoryUser || (doc?.exists ? doc.data() : null);
+    if (!user) return res.status(404).json({ error: "Foydalanuvchi topilmadi." });
+    if (user.role === "super_admin") return res.status(400).json({ error: "Superadmin huquqlarini o'zgartirib bo'lmaydi." });
+    const { role, permissions } = req.body;
+    if (!["admin", "manager", "designer", "worker", "accountant", "viewer", "client"].includes(role) ||
+        !Array.isArray(permissions) || permissions.some(p => !FINANCE_PERMS.includes(p))) {
+      return res.status(400).json({ error: "Rol yoki huquqlar noto'g'ri." });
+    }
+    const changes = { role, permissions: JSON.stringify([...new Set(permissions)]) };
+    if (req.body.password) {
+      if (String(req.body.password).length < 8) return res.status(400).json({ error: "Parol kamida 8 belgi." });
+      changes.passHash = await bcrypt.hash(String(req.body.password), 10);
+    }
+    if (memoryUser) Object.assign(memoryUser, changes);
+    else await withTimeout(ref.update(changes), 10000);
+    res.json({ ok: true });
+  } catch (err) { res.status(503).json({ error: err.message }); }
 });
 
 app.delete("/api/users/:id", authRequired, superAdminRequired, async (req, res) => {

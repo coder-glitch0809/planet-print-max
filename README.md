@@ -78,3 +78,20 @@ node scripts/test_firebase_credentials.js
 - Har oyning 1-sanasidan to'lov eslatmasi ko'rinadi. 5-sanasidan keyin super admin to'lovni tasdiqlamaguncha boshqa foydalanuvchilar uchun amallar bloklanadi; super admin ishlashda davom etadi va to'lov panelini chetda ko'radi.
 - Bo'limlar o'ziga xos rang bilan ajratilgan; tungi rejimda bo'lim rangi faqat urg'u rangiga ta'sir qiladi, fon va panellar qorong'i bo'lib qoladi.
 # planet-print-max
+# Admin huquqlari, MAX va Telegram xodimlar boti
+
+- Superadmin **Foydalanuvchilar → Tahrirlash** orqali rol va mas’ul bo‘limlarni o‘zgartiradi. Bo‘sh parol eski parolni saqlaydi. Server har so‘rovda amaldagi huquqlarni tekshiradi; eski token bekor qilingan huquqni qaytarmaydi. Yangi menyuni olish uchun sahifani yangilang.
+- **To‘lovlar → MAX** tanlangan zakazning qolgan qarzini kiritadi. To‘lovni saqlash orqali qarz yopiladi. MAX bosishning o‘zi pul tushumini saqlamaydi.
+- **Ishchilar** kartasida telefon raqami, lavozim va Telegram xabar turlarini belgilang. Tanlangan turdagi yangi yoki o‘zgartirilgan yozuvlar haqida shu xodimga xabar yuboriladi. Bu tanlov barcha shu turdagi yozuvlarga tegishli; alohida zakaz bo‘yicha xodim tayinlash filtri emas.
+- **Sozlamalar → Bog‘lanishlarni tekshirish** orqali chat ID va ulanish holatini ko‘ring; kerak bo‘lsa bog‘lanishni uzing.
+
+Telegramni ishga tushirish:
+
+1. Server muhitida `TELEGRAM_BOT_TOKEN`, `APP_PUBLIC_URL` (saytning ochiq HTTPS manzili) va `TELEGRAM_WEBHOOK_SECRET` (tasodifiy 16–256 belgi, harf/raqam/`_`/`-`) kiriting. Namunalar `.env.example` da. Tokenlarni brauzerga kiritmang.
+2. Saytni shu manzilga joylashtirgandan keyin superadmin **Sozlamalar → Botni ulash (webhook)** tugmasini bir marta bosadi.
+3. Xodim `/start` bosadi. Bot chat IDni o‘zi oladi. Telegram telefonni avtomatik bermagani uchun xodim **Telefon raqamni yuborish** tugmasini bir marta bosadi. Bot faqat jo‘natuvchining o‘z kontaktini qabul qiladi va dasturdagi yagona mos raqamga bog‘laydi.
+4. Dizayn rasmi tanlangan xodimlarga jo‘natiladi. `TELEGRAM_INSTALLERS_CHAT_ID` kiritilgan bo‘lsa, montaj guruhiga ham boradi. Rasmlarni saqlash uchun mavjud `TELEGRAM_MEDIA_CHAT_ID` sozlamasi kerak.
+
+Bog‘lanishlar Firebase `telegramStaff` kolleksiyasida saqlanadi; Firebase bo‘lmagan xotira rejimida server qayta ishga tushsa yo‘qoladi. Telegram yuborish xatosi moliyaviy yozuvni bekor qilmaydi; avtomatik qayta yuborish navbati yo‘q. Haqiqiy Telegram/Firebase xizmatlariga tegmasdan regressiya testlari: `npm test`.
+
+Telegram kontakt va webhook talablari: https://core.telegram.org/bots/api#keyboardbutton va https://core.telegram.org/bots/api#setwebhook.

@@ -187,7 +187,7 @@
           <form id="workerForm">
             <div class="grid-3">
               <div><label for="wName">Ishchi ismi</label><input id="wName" required /></div>
-              <div><label for="wRole">Lavozimi</label><input id="wRole" required /></div>
+              <div><label for="wPhone">Telegram uchun telefon (+998...)</label><input id="wPhone" type="tel" placeholder="+998901234567" /></div><div class="worker-notifications"><label>Telegram xabarlari</label><label class="checkline"><input type="checkbox" data-notify="projects" />Zakazlar</label><label class="checkline"><input type="checkbox" data-notify="measurements" />O‘lchovlar</label><label class="checkline"><input type="checkbox" data-notify="designs" />Dizaynlar</label><label class="checkline"><input type="checkbox" data-notify="payments" />To‘lovlar</label><label class="checkline"><input type="checkbox" data-notify="expenses" />Xarajatlar</label><label class="checkline"><input type="checkbox" data-notify="announcements" />E’lonlar</label></div><div><label for="wRole">Lavozimi</label><input id="wRole" required /></div>
               <div><label for="wSalary">Oyligi (UZS)</label><input id="wSalary" inputmode="decimal" required /></div>
             </div>
             <div class="actions">
@@ -366,7 +366,7 @@
             <div class="grid-4">
               <div><label for="paymentDate">Sana</label><input id="paymentDate" type="date" required /></div>
               <div><label for="paymentProjectId">Zakaz</label><select id="paymentProjectId" required></select></div>
-              <div><label for="paymentAmount">Summa (UZS)</label><input id="paymentAmount" inputmode="decimal" required /></div>
+              <div><label for="paymentAmount">Summa (UZS)</label><div class="amount-with-max"><input id="paymentAmount" inputmode="decimal" required /><button id="paymentMax" type="button" title="Qolgan qarzni to‘liq kiritish">MAX</button></div></div>
               <div><label for="paymentType">To'lov turi</label><select id="paymentType" required><option>Naqd</option><option>Karta</option><option>Bank o'tkazma</option><option>Aralash</option></select></div>
               <div><label for="paymentNote">Izoh</label><input id="paymentNote" maxlength="160" /></div>
             </div>
@@ -426,14 +426,14 @@
               <div><label for="uName">Login</label><input id="uName" maxlength="32" required /></div>
               <div><label for="uEmail">Email</label><input id="uEmail" type="email" maxlength="128" required /></div>
               <div><label for="uPass">Parol</label><input id="uPass" type="password" maxlength="64" required /></div>
-              <div><label for="uRole">Roli</label><select id="uRole"><option value="admin">Admin</option><option value="manager">Manager</option><option value="designer">Dizayner</option><option value="worker">Xodim</option><option value="viewer">Viewer</option><option value="client">Zakazchi</option></select></div>
+              <div><label for="uRole">Roli</label><select id="uRole"><option value="admin">Admin</option><option value="manager">Manager</option><option value="designer">Dizayner</option><option value="worker">Montajnik / Xodim</option><option value="accountant">Buxgalter</option><option value="viewer">Viewer</option><option value="client">Zakazchi</option></select></div>
             </div>
             <label class="checkline"><input id="uShowPass" type="checkbox" /> Parolni ko'rsatish</label>
             <div>
-              <label>Admin huquqlari (sahifalar)</label>
+              <label>Mas’ul bo‘limlar (tanlangan bo‘limlarda ishlash huquqi; Viewer faqat ko‘radi)</label>
               <div class="perm-grid" id="permGrid"></div>
             </div>
-            <div class="actions"><button type="submit">Foydalanuvchi qo'shish</button></div>
+            <div class="actions"><button type="submit">Foydalanuvchi qo'shish</button><button id="userCancelEdit" type="button" class="ghost hidden">Bekor qilish</button></div>
             <div id="userMsg" class="msg"></div>
           </form>
           <div class="table-wrap">
@@ -461,10 +461,14 @@
         </div>
         <div class="panel card super-only">
           <h2 class="section-title">Telegram orqali ishchilarga xabar</h2>
-          <p class="section-help">E'lon montajchilar guruhiga bot nomidan yuboriladi.</p>
+          <p class="section-help">Ishchilar bo‘limida telefon va xabar turlarini belgilang. Xodim botda /start bosib, o‘z telefonini bir marta yuboradi.</p>
+          <div class="actions"><button id="telegramSetup" type="button">Botni ulash (webhook)</button><button id="telegramRefresh" type="button" class="ghost">Bog‘lanishlarni tekshirish</button></div>
+          <div id="telegramStaffStatus" class="msg" aria-live="polite"></div>
+          <div id="telegramStaffList"></div>
+          <p class="section-help">Xabar telefon orqali botga bog‘langan va E’lonlar xabari tanlangan xodimlarga yuboriladi.</p>
           <form id="announcementForm" class="form-grid">
             <div><label for="announcementText">Xabar matni</label><textarea id="announcementText" rows="4" maxlength="3500" required placeholder="Platformadagi yangilik yoki ishchilar uchun e'lon"></textarea></div>
-            <div class="actions"><button type="submit">Telegram guruhiga yuborish</button></div>
+            <div class="actions"><button type="submit">Xodimlarga yuborish</button></div>
             <div id="announcementMsg" class="msg" role="status" aria-live="polite"></div>
           </form>
         </div>
