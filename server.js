@@ -1030,7 +1030,8 @@ app.post("/api/auth/login", async (req, res) => {
     if (FALLBACK_ADMIN_ENABLED && login === FALLBACK_ADMIN_USER && password === FALLBACK_ADMIN_PASS) {
       return sendLogin(res, fallbackAdminUser());
     }
-    if (!firestore) return res.status(401).json({ error: "Telefon raqami, login yoki parol noto'g'ri." });
+    // Baza ulanmagan bo'lsa, to'g'ri parol ham tekshirib bo'lmaydi: sababini aniq aytamiz.
+    if (!firestore) return res.status(401).json({ error: "Server ma'lumotlar bazasiga (Firebase) ulanmagan, shuning uchun login tekshirilmadi. Hostingda (Vercel → Settings → Environment Variables) FIREBASE_SERVICE_ACCOUNT_BASE64 ni tekshiring va qayta deploy qiling." });
     res.status(503).json({
       error: `Firebase bilan aloqa yo'q: ${err.message}. Vercel Environment Variables va Firebase service account sozlamasini tekshiring.`
     });
