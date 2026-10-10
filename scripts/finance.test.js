@@ -104,6 +104,16 @@ test("finance safety: stale saves, archive protection and validation", async t =
     assert.equal((await request("/api/finance", "PUT", { finance, revision: current.body.revision })).status, 200);
   });
 
+  await t.test("expense paid from another order's money is accepted only for a real order", async () => {
+    const current = await request("/api/finance");
+    const finance = current.body.finance;
+    finance.expenses.push({ id: "eb1", type: "banner", amount: 300, allocations: [{ projectId: "p2", amount: 300, fundedByProjectId: "nope" }] });
+    assert.equal((await request("/api/finance", "PUT", { finance, revision: current.body.revision })).status, 400);
+    finance.expenses[finance.expenses.length - 1].allocations[0].fundedByProjectId = "p1";
+    assert.equal((await request("/api/finance", "PUT", { finance, revision: current.body.revision })).status, 200);
+    assert.equal(store.finance.expenses.find(e => e.id === "eb1").allocations[0].fundedByProjectId, "p1");
+  });
+
   await t.test("news shows changes only to users allowed to see that section", async () => {
     const admin = await request("/api/news");
     assert.equal(admin.status, 200);

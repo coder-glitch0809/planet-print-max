@@ -203,7 +203,10 @@
       saveSettings: document.getElementById("saveSettings"), clearData: document.getElementById("clearData"), settingsMsg: document.getElementById("settingsMsg")
     };
 
-    const fmt = (v) => new Intl.NumberFormat("uz-UZ", { maximumFractionDigits: 0 }).format(Math.round(Number(v) || 0)) + " UZS";
+    const fmt = (v) => {
+      const n = Math.round(Number(v) || 0);
+      return (n < 0 ? "−" : "") + String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " UZS";
+    };
     const clean = (t) => String(t || "").replace(/[<>"'`]/g, "").trim();
     const num = (v) => {
       const n = Number(String(v ?? "").replace(/\s/g, "").replace(/,/g, ".").replace(/[^0-9.-]/g, ""));
@@ -403,7 +406,7 @@
       const dark = name === "dark";
       document.body.classList.toggle("dark", dark);
       localStorage.setItem(THEME_KEY, dark ? "dark" : "light");
-      el.themeBtn.textContent = dark ? "Dark Mode" : "Light Mode";
+      el.themeBtn.textContent = dark ? "☀ Kunduzgi rejim" : "☾ Tungi rejim";
       drawCharts();
     }
 
@@ -494,27 +497,37 @@
       return map;
     }
 
+    // Har bir ishchi alohida hisoblanadi: birining ortiqcha olgani boshqasining qarzini yopmaydi.
+    function workerLedger() {
+      const avMap = workerAdvanceById();
+      const paidMap = workerSalaryPaidById();
+      return state.finance.workers.map(w => {
+        const salary = num(w.salary), advance = avMap[w.id] || 0, paid = paidMap[w.id] || 0;
+        return { ...w, salary, advance, paid, remain: roundMoney(salary - advance - paid) };
+      });
+    }
+
     function summary() {
       // O'tgan oydan qarzi bilan ko'chgan zakazning summasi o'z oyida hisoblangan:
       // bu oyning soliq/zaxira/ta'sischi fondiga qayta qo'shilsa, daromad ikki marta hisoblanadi.
       const monthProjects = state.finance.projects.filter(p => !p.carriedFromMonth);
       const carriedProjects = state.finance.projects.filter(p => p.carriedFromMonth);
-      const totalAmount = monthProjects.reduce((a, p) => a + num(p.amount), 0);
+      const totalAmount = roundMoney(monthProjects.reduce((a, p) => a + num(p.amount), 0));
       const carriedDebt = carriedProjects.reduce((a, p) => a + Math.max(num(p.amount) - num(p.advance), 0), 0);
       const totalAdvance = state.finance.projects.reduce((a, p) => a + num(p.advance), 0);
       const receivable = state.finance.projects.reduce((a, p) => a + Math.max(num(p.amount) - num(p.advance), 0), 0);
 
-      const workerAvMap = workerAdvanceById();
-      const workerPaidMap = workerSalaryPaidById();
-      const salaryFundBase = state.finance.workers.reduce((a, w) => a + num(w.salary), 0);
-      const workerAdvanceTotal = Object.values(workerAvMap).reduce((a, v) => a + v, 0);
-      const workerSalaryPaidTotal = Object.values(workerPaidMap).reduce((a, v) => a + v, 0);
-      const salaryPayableNow = Math.max(salaryFundBase - workerAdvanceTotal - workerSalaryPaidTotal, 0);
+      const workers = workerLedger();
+      const salaryFundBase = workers.reduce((a, w) => a + w.salary, 0);
+      const workerAdvanceTotal = workers.reduce((a, w) => a + w.advance, 0);
+      const workerSalaryPaidTotal = workers.reduce((a, w) => a + w.paid, 0);
+      const salaryPayableNow = roundMoney(workers.reduce((a, w) => a + Math.max(w.remain, 0), 0));
+      const salaryOverpaid = roundMoney(workers.reduce((a, w) => a + Math.max(-w.remain, 0), 0));
 
       const taxPercent = Math.min(Math.max(num(state.finance.settings.tax), 0), 100);
       const reservePercent = Math.min(Math.max(num(state.finance.settings.reserve), 0), 100);
-      const tax = totalAmount * taxPercent / 100;
-      const reserve = totalAmount * reservePercent / 100;
+      const tax = roundMoney(totalAmount * taxPercent / 100);
+      const reserve = roundMoney(totalAmount * reservePercent / 100);
       const manualOther = Math.max(num(state.finance.settings.other), 0);
       const expenseByType = {};
       state.finance.expenses.forEach((e) => { expenseByType[e.type] = (expenseByType[e.type] || 0) + num(e.amount); });
@@ -522,28 +535,38 @@
       state.finance.expenses.forEach((e) => {
         if (EXPENSE_PAYMENT_LABEL[e.paymentType]) expensePaymentByType[e.paymentType] = (expensePaymentByType[e.paymentType] || 0) + num(e.amount);
       });
-      const explicitExpense = REAL_EXPENSE_TYPES.reduce((a, t) => a + (expenseByType[t] || 0), 0);
-      const totalRealExpenses = manualOther + tax + reserve + explicitExpense;
+      const explicitExpense = roundMoney(REAL_EXPENSE_TYPES.reduce((a, t) => a + (expenseByType[t] || 0), 0));
+      // Ishchilarga shu oy hali to'lanmagan oylik ham majburiyat: u ta'sischilarga bo'linmasligi kerak.
+      const totalRealExpenses = roundMoney(manualOther + tax + reserve + explicitExpense + salaryPayableNow);
 
-      const founderPoolRaw = totalAmount - totalRealExpenses;
-      const founderPool = Math.max(founderPoolRaw, 0);
+      // Fond manfiy bo'lishi mumkin (zarar): u yashirilmaydi, ta'sischilarga ulushiga qarab tushadi.
+      const founderPoolRaw = roundMoney(totalAmount - totalRealExpenses);
+      const founderPool = founderPoolRaw;
       const founderShareTotal = state.finance.founders.reduce((a, f) => a + num(f.share), 0);
       const founderAvMap = founderAdvanceById();
       const founderRows = state.finance.founders.map((f) => {
-        const base = founderPool * num(f.share) / 100;
-        const founderAdvance = founderAvMap[f.id] || 0;
-        const final = Math.max(base - founderAdvance, 0);
+        const base = roundMoney(founderPoolRaw * num(f.share) / 100);
+        const founderAdvance = roundMoney(founderAvMap[f.id] || 0);
+        const final = roundMoney(base - founderAdvance);
         return { ...f, base, founderAdvance, final };
       });
-      const founderAdvanceTotal = Object.values(founderAvMap).reduce((a, v) => a + v, 0);
-      const overdueProjects = state.finance.projects.filter(p => liveStatus(p) === "Kechiktirilgan zakaz").length;
-      const dueTodayProjects = state.finance.projects.filter(p => liveStatus(p) === "Topshirish vaqti").length;
-      const completedProjects = state.finance.projects.filter(p => liveStatus(p) === "Yakunlangan").length;
+      const founderAdvanceTotal = roundMoney(Object.values(founderAvMap).reduce((a, v) => a + v, 0));
+      const removedFounderAdvance = roundMoney(founderAdvanceTotal - founderRows.reduce((a, f) => a + f.founderAdvance, 0));
+      const unassignedShare = Math.max(roundMoney(100 - founderShareTotal), 0);
+      const unassignedAmount = roundMoney(founderPoolRaw * unassignedShare / 100);
+      const founderPayable = roundMoney(founderRows.reduce((a, f) => a + Math.max(f.final, 0), 0));
+      const founderOwes = roundMoney(founderRows.reduce((a, f) => a + Math.max(-f.final, 0), 0));
+      const statuses = state.finance.projects.map(liveStatus);
+      const overdueProjects = statuses.filter(s => s === "Kechiktirilgan zakaz").length;
+      const dueTodayProjects = statuses.filter(s => s === "Topshirish vaqti").length;
+      const completedProjects = statuses.filter(s => s === "Yakunlangan").length;
 
       return {
-        totalAmount, carriedCount: carriedProjects.length, carriedDebt, totalAdvance, receivable, salaryFundBase, workerAdvanceTotal, workerSalaryPaidTotal, salaryPayableNow,
-        tax, reserve, manualOther, expenseByType, expensePaymentByType, explicitExpense, totalRealExpenses,
-        founderPoolRaw, founderPool, founderShareTotal, founderRows, founderAdvanceTotal,
+        totalAmount, carriedCount: carriedProjects.length, carriedDebt, totalAdvance, receivable,
+        workers, salaryFundBase, workerAdvanceTotal, workerSalaryPaidTotal, salaryPayableNow, salaryOverpaid,
+        taxPercent, reservePercent, tax, reserve, manualOther, expenseByType, expensePaymentByType, explicitExpense, totalRealExpenses,
+        founderPoolRaw, founderPool, founderShareTotal, founderRows, founderAdvanceTotal, removedFounderAdvance,
+        unassignedShare, unassignedAmount, founderPayable, founderOwes,
         overdueProjects, dueTodayProjects, completedProjects
       };
     }
@@ -563,47 +586,55 @@
       return "pill s-new";
     }
 
+    // Manfiy summa qizil rangda va minus belgisi bilan ko'rsatiladi.
+    const money = (value) => `<span class="${num(value) < 0 ? "neg" : ""}">${fmt(value)}</span>`;
+    const calcStep = (label, value, cls = "", note = "") =>
+      `<li class="${cls}"><span>${label}${note ? `<span class="note">${note}</span>` : ""}</span><b class="${num(value) < 0 && !cls.includes("minus") ? "neg" : ""}">${fmt(value)}</b></li>`;
+
     function renderSummary() {
       const s = summary();
-      const items = [
-        { t: "Jami loyiha summasi", v: fmt(s.totalAmount), meta: `${state.finance.projects.length} ta loyiha`, cls: "income" },
-        { t: "Mijoz avansi", v: fmt(s.totalAdvance), meta: `Qolgan to'lov: ${fmt(s.receivable)}`, cls: "cash" },
-        { t: "Xarajatlar jami", v: fmt(s.totalRealExpenses), meta: `Xarajat bo'limi: ${fmt(s.explicitExpense)}`, cls: "warn-kpi" },
-        { t: "Ishchi avansi", v: fmt(s.workerAdvanceTotal), meta: `Qolgan oylik: ${fmt(s.salaryPayableNow)}`, cls: "neutral-kpi" },
-        { t: "Muddat nazorati", v: `${s.overdueProjects} ta`, meta: `Bugun topshirish: ${s.dueTodayProjects} ta, yakunlangan: ${s.completedProjects} ta`, cls: s.overdueProjects ? "danger-kpi" : "cash" },
-        { t: "Ta'sischi fondi", v: fmt(s.founderPool), meta: `Soliq ${fmt(s.tax)}, zaxira ${fmt(s.reserve)}, qo'lda ${fmt(s.manualOther)}`, cls: "profit-kpi" }
-      ];
-      el.kpiGrid.innerHTML = items.map(x => `<div class="kpi card ${x.cls}"><div><h3>${x.t}</h3><div class="v">${x.v}</div></div><div class="meta">${x.meta}</div></div>`).join("");
       renderDashboardPeriod();
       el.formulaList.innerHTML = [
-        `Shu oy olingan zakazlar summasi = ${fmt(s.totalAmount)}${s.carriedCount ? ` (o'tgan oydan ko'chgan ${s.carriedCount} ta zakaz qayta qo'shilmaydi, ularning qarzi: ${fmt(s.carriedDebt)})` : ""}`,
-        `Xarajatlar = Qo'lda (${fmt(s.manualOther)}) + Soliq (${fmt(s.tax)}) + Zaxira (${fmt(s.reserve)}) + Xarajat bo'limi (${fmt(s.explicitExpense)})`,
-        `Ishchi avansi xarajatga kiradi va "Oylik maosh avansi" turida yuritiladi: ${fmt(s.workerAdvanceTotal)}`,
-        `Ta'sischi avansi xarajat emas, ta'sischining ulushidan ayriladi: ${fmt(s.founderAdvanceTotal)}`,
-        `Ta'sischilar fondi = ${fmt(s.totalAmount)} - ${fmt(s.totalRealExpenses)} = ${fmt(s.founderPoolRaw)} (manfiy bo'lsa 0)`
-      ].map(x => `<li>${x}</li>`).join("");
-      el.checkList.classList.add("check-list");
-      el.checkList.innerHTML = [
-        `<li>Loyihalar soni: ${state.finance.projects.length}</li>`,
-        `<li>Bugun topshirish vaqti kelgan: ${s.dueTodayProjects}</li>`,
-        `<li>Kechiktirilgan zakaz: ${s.overdueProjects}</li>`,
-        `<li>Xarajat to'lovlari: Naqd ${fmt(s.expensePaymentByType.naqd || 0)}, Klik ${fmt(s.expensePaymentByType.klik || 0)}, Shot ${fmt(s.expensePaymentByType.shot || 0)}</li>`,
-        `<li>Ta'sischilar foizi jami: ${s.founderShareTotal.toFixed(2)}%</li>`,
-        `<li>Qolgan oylik jami: ${fmt(s.salaryPayableNow)}</li>`
+        calcStep("Shu oy olingan zakazlar summasi", s.totalAmount, "", s.carriedCount ? `O'tgan oydan ko'chgan ${s.carriedCount} ta zakaz qo'shilmaydi (daromadi o'z oyida hisoblangan, qolgan qarzi ${fmt(s.carriedDebt)})` : "Kassaga tushmagan qarz ham kiradi"),
+        calcStep(`Soliq (${s.taxPercent}%)`, s.tax, "minus"),
+        calcStep(`Zaxira (${s.reservePercent}%)`, s.reserve, "minus"),
+        calcStep("Qo'lda kiritilgan umumiy xarajat", s.manualOther, "minus"),
+        calcStep("Xarajatlar (material, oylik, ishchi avansi)", s.explicitExpense, "minus", "Ta'sischi avansi bu yerga kirmaydi — u ulushdan ayriladi"),
+        calcStep("Ishchilarga hali to'lanmagan oylik", s.salaryPayableNow, "minus", "Ishchilarga beriladigan pul ta'sischilarga bo'linmaydi"),
+        calcStep(s.founderPoolRaw < 0 ? "Ta'sischilar fondi — ZARAR" : "Ta'sischilar fondi", s.founderPoolRaw, "total",
+          s.founderPoolRaw < 0 ? "Zarar ta'sischilarga ulushiga qarab taqsimlanadi" : `Ta'sischilarga berilgan avanslar: ${fmt(s.founderAdvanceTotal)}`)
       ].join("");
-      if (s.founderShareTotal > 100) el.checkList.innerHTML += `<li style="color:#b42318;">Diqqat: foiz 100% dan oshgan.</li>`;
+      const checks = [];
+      const add = (text, alert = false) => checks.push(`<li class="${alert ? "is-alert" : ""}">${text}</li>`);
+      add(`Loyihalar: ${state.finance.projects.length} ta — bugun topshiriladi: ${s.dueTodayProjects}, kechikkan: ${s.overdueProjects}`, s.overdueProjects > 0);
+      add(`Xarajat to'lovlari: naqd ${fmt(s.expensePaymentByType.naqd || 0)}, Klik ${fmt(s.expensePaymentByType.klik || 0)}, karta (shot) ${fmt(s.expensePaymentByType.shot || 0)}`);
+      if (s.founderShareTotal > 100.0001) add(`Ta'sischilar foizi jami ${s.founderShareTotal.toFixed(2)}% — 100% dan oshgan!`, true);
+      else if (s.unassignedShare > 0 && state.finance.founders.length) add(`Ta'sischilar foizi jami ${s.founderShareTotal.toFixed(2)}%. Qolgan ${s.unassignedShare.toFixed(2)}% (${fmt(s.unassignedAmount)}) kompaniyada qoladi.`);
+      else add(`Ta'sischilar foizi jami: ${s.founderShareTotal.toFixed(2)}%`);
+      const overdrawn = s.founderRows.map(f => ({ f, over: founderDebtParts(f).overdrawn })).filter(x => x.over > 0);
+      if (overdrawn.length) add(`Ulushidan ortiq avans olgan: ${overdrawn.map(x => `${clean(x.f.name)} (${fmt(x.over)} ortiqcha)`).join(", ")}`, true);
+      if (s.founderPoolRaw < 0 && state.finance.founders.length) add(`Oy zarar bilan: ${fmt(-s.founderPoolRaw)} zarar ta'sischilarga ulushiga qarab yozildi`, true);
+      if (s.removedFounderAdvance > 0) add(`O'chirilgan ta'sischilarga berilgan avans: ${fmt(s.removedFounderAdvance)} — hech kimning ulushidan ayrilmayapti`, true);
+      add(`Ishchilarga qolgan oylik: ${fmt(s.salaryPayableNow)}`);
+      if (s.salaryOverpaid > 0) add(`Ishchilarga oyligidan ortiq to'langan: ${fmt(s.salaryOverpaid)}`, true);
+      const flows = orderFlows();
+      if (flows.borrowings.length) add(`Zakazlar orasida qarz bor: ${flows.borrowings.length} ta (Xarajatlar bo'limida batafsil)`, true);
+      if (flows.suspicious.length) add(`Izohida boshqa zakaz nomi bor xarajat: ${flows.suspicious.length} ta — to'g'ri zakazga yozilganini tekshiring`, true);
+      el.checkList.innerHTML = checks.join("");
     }
 
     function renderProjectAlerts() {
       const alerts = state.finance.projects
         .map((p) => ({ project: p, status: liveStatus(p) }))
         .filter((item) => item.status === "Topshirish vaqti" || item.status === "Kechiktirilgan zakaz")
+        .sort((a, b) => (a.status === b.status ? 0 : a.status === "Kechiktirilgan zakaz" ? -1 : 1))
         .map((item) => {
-          const cls = item.status === "Topshirish vaqti" ? "today" : "overdue";
-          const text = item.status === "Topshirish vaqti"
-            ? `${clean(item.project.name)} zakazini bugun topshirish vaqti.`
-            : `${clean(item.project.name)} kechiktirilgan zakaz sifatida turibdi.`;
-          return `<div class="alert-card ${cls}"><strong>${item.status}</strong><br>${text}</div>`;
+          const overdue = item.status === "Kechiktirilgan zakaz";
+          const debt = Math.max(num(item.project.amount) - num(item.project.advance), 0);
+          const text = overdue
+            ? `Muddati ${clean(item.project.dueDate)} edi${debt ? ` · qarz <span class="nowrap">${fmt(debt)}</span>` : ""}`
+            : `Bugun topshirilishi kerak${debt ? ` · qarz <span class="nowrap">${fmt(debt)}</span>` : ""}`;
+          return `<div class="alert-card ${overdue ? "overdue" : "today"}"><span class="alert-icon" aria-hidden="true">${overdue ? "!" : "⏱"}</span><div><strong>${clean(item.project.name)} — ${overdue ? "kechikkan" : "bugun topshirish"}</strong>${text}</div></div>`;
         })
         .join("");
       if (el.projectAlerts) el.projectAlerts.innerHTML = isSuperAdmin() ? alerts : "";
@@ -779,15 +810,14 @@
     }
 
     function renderWorkers() {
-      const avMap = workerAdvanceById();
-      const paidMap = workerSalaryPaidById();
       if (!state.finance.workers.length) { el.workersBody.innerHTML = `<tr><td colspan="7">Hozircha ishchi yo'q.</td></tr>`; return; }
-      el.workersBody.innerHTML = state.finance.workers.map((w) => {
-        const av = avMap[w.id] || 0;
-        const paid = paidMap[w.id] || 0;
-        const remain = Math.max(num(w.salary) - av - paid, 0);
+      el.workersBody.innerHTML = workerLedger().map((w) => {
+        const remainCell = w.remain < 0
+          ? `<span class="neg">${fmt(w.remain)}</span><div class="expense-order-detail">Oyligidan ${fmt(-w.remain)} ortiq to'langan</div>`
+          : fmt(w.remain);
         return `<tr>
-          <td>${clean(w.name)}<br><small>${clean(w.phone || "Telefon kiritilmagan")}</small></td><td>${clean(w.role)}</td><td>${fmt(w.salary)}</td><td>${fmt(av)}</td><td>${fmt(paid)}</td><td>${fmt(remain)}</td>
+          <td>${clean(w.name)}<br><small>${clean(w.phone || "Telefon kiritilmagan")}</small></td><td>${clean(w.role)}</td>
+          <td class="num">${fmt(w.salary)}</td><td class="num">${fmt(w.advance)}</td><td class="num">${fmt(w.paid)}</td><td class="num">${remainCell}</td>
           <td>
             <button class="ghost small-btn" type="button" data-edit-w="${clean(w.id)}">Tahrirlash</button>
             <button class="danger small-btn" type="button" data-del-w="${clean(w.id)}">O'chirish</button>
@@ -810,25 +840,36 @@
       }));
     }
 
+    // Manfiy hisobning ikki sababi bo'lishi mumkin: oy zarari ulushi va ulushdan ortiq olingan avans.
+    function founderDebtParts(f) {
+      const lossShare = Math.max(-f.base, 0);
+      const overdrawn = roundMoney(Math.max(f.founderAdvance - Math.max(f.base, 0), 0));
+      return { lossShare, overdrawn };
+    }
+    function founderStatus(final) {
+      if (final < 0) return `<span class="pill s-over">Kompaniyaga qarzdor</span>`;
+      if (final > 0) return `<span class="pill s-done">Olishi kerak</span>`;
+      return `<span class="pill s-new">Hisob yopiq</span>`;
+    }
+
     function renderFounders() {
       const s = summary();
-      const finalTotal = s.founderRows.reduce((a, f) => a + num(f.final), 0);
       el.founderCalcList.innerHTML = [
-        `<li>Shu oy olingan zakazlar summasi: ${fmt(s.totalAmount)}</li>`,
-        ...(s.carriedCount ? [`<li>O'tgan oydan ko'chgan zakazlar: ${s.carriedCount} ta, qolgan qarz ${fmt(s.carriedDebt)} (daromadi o'z oyida hisoblangan)</li>`] : []),
-        `<li>Soliq: ${fmt(s.tax)}</li>`,
-        `<li>Zaxira: ${fmt(s.reserve)}</li>`,
-        `<li>Qo'lda kiritilgan umumiy xarajat: ${fmt(s.manualOther)}</li>`,
-        `<li>Xarajat bo'limi jami: ${fmt(s.explicitExpense)}</li>`,
-        `<li>Ta'sischilar fondi (xarajatlardan keyin): ${fmt(s.founderPool)}</li>`,
-        `<li>Ta'sischilar avansi jami: ${fmt(s.founderAdvanceTotal)}</li>`,
-        `<li>Yakuniy bo'linadigan summa: ${fmt(finalTotal)}</li>`,
-        `<li>Nazorat: Har bir ta'sischi uchun yakuniy ulush = bazaviy ulush - shu ta'sischining avansi</li>`
+        calcStep(s.founderPoolRaw < 0 ? "Ta'sischilar fondi (zarar)" : "Ta'sischilar fondi", s.founderPoolRaw, "", "Hisob-kitob markazidagi formula bo'yicha"),
+        calcStep(`Ta'sischilarga tegishli qism (${Math.min(s.founderShareTotal, 100).toFixed(2)}%)`, roundMoney(s.founderPoolRaw - s.unassignedAmount)),
+        ...(s.unassignedShare > 0 && state.finance.founders.length ? [calcStep(`Taqsimlanmagan ${s.unassignedShare.toFixed(2)}% — kompaniyada qoladi`, s.unassignedAmount)] : []),
+        calcStep("Ta'sischilar olgan avanslar", roundMoney(s.founderAdvanceTotal - s.removedFounderAdvance), "minus"),
+        calcStep("Yakuniy qoldiq (ulush − avans)", roundMoney(s.founderPayable - s.founderOwes), "total"),
+        calcStep("shundan ta'sischilarga to'lanadi", s.founderPayable, "", "Qoldig'i musbat ta'sischilar"),
+        ...(s.founderOwes > 0 ? [`<li><span>shundan ta'sischilarning kompaniyaga qarzi<span class="note">Zarar ulushi va ulushdan ortiq olingan avans</span></span><b class="neg">${fmt(-s.founderOwes)}</b></li>`] : [])
       ].join("");
-      if (!state.finance.founders.length) { el.foundersBody.innerHTML = `<tr><td colspan="7">Hozircha ta'sischi yo'q.</td></tr>`; return; }
+      if (!state.finance.founders.length) { el.foundersBody.innerHTML = `<tr><td colspan="8">Hozircha ta'sischi yo'q.</td></tr>`; return; }
       el.foundersBody.innerHTML = s.founderRows.map((f) => `<tr>
-        <td>${clean(f.name)}</td><td>${num(f.share).toFixed(2)}%</td><td>${clean(f.note || "-")}</td>
-        <td>${fmt(f.base)}</td><td>${fmt(f.founderAdvance)}<div class="expense-order-detail">${founderAdvanceProjectDetails(f.id)}</div></td><td>${fmt(f.final)}</td>
+        <td>${clean(f.name)}</td><td class="num">${num(f.share).toFixed(2)}%</td><td>${clean(f.note || "-")}</td>
+        <td class="num">${money(f.base)}</td>
+        <td class="num">${fmt(f.founderAdvance)}<div class="expense-order-detail">${founderAdvanceProjectDetails(f.id)}</div></td>
+        <td class="num"><b>${money(f.final)}</b>${f.final < 0 ? (() => { const d = founderDebtParts(f); return `<div class="expense-order-detail">${d.lossShare ? `zarar ulushi ${fmt(d.lossShare)}` : ""}${d.lossShare && d.overdrawn ? "<br>" : ""}${d.overdrawn ? `ortiqcha avans ${fmt(d.overdrawn)}` : ""}</div>`; })() : ""}</td>
+        <td>${founderStatus(f.final)}</td>
         <td>
           <button class="ghost small-btn" type="button" data-edit-f="${clean(f.id)}">Tahrirlash</button>
           <button class="danger small-btn" type="button" data-del-f="${clean(f.id)}">O'chirish</button>
@@ -863,6 +904,8 @@
       const t = el.eType.value;
       el.eWorkerWrap.classList.toggle("hidden", t !== "oylik_avans" && t !== "oylik_tolov");
       el.eFounderWrap.classList.toggle("hidden", t !== "founder_avans");
+      // Ta'sischi avansida zakaz = pul olingan zakazning o'zi, alohida "pul manbai" kerak emas.
+      renderAllocationRows();
     }
 
     function expenseAllocations(expense) {
@@ -873,28 +916,46 @@
       return [];
     }
 
-    function allocationProjectOptions(selectedId = "") {
+    // Xarajat qaysi zakaz pulidan to'langani: berilmagan bo'lsa — o'sha zakazning o'zi.
+    function allocationFundingId(expense, allocation) {
+      return expense.type === "founder_avans" ? allocation.projectId : (allocation.fundedByProjectId || allocation.projectId);
+    }
+
+    function knownProjectName(id, fallback = "") {
+      return state.finance.projects.find(project => project.id === id)?.name
+        || fallback
+        || state.finance.expenses.flatMap(expenseAllocations).find(a => a.projectId === id)?.projectName
+        || state.finance.expenses.flatMap(expenseAllocations).find(a => a.fundedByProjectId === id)?.fundedByProjectName
+        || "O'chirilgan zakaz";
+    }
+
+    function allocationProjectOptions(selectedId = "", { placeholder = "Zakazni tanlang", allowEmpty = false } = {}) {
       const options = state.finance.projects.map(project =>
         `<option value="${clean(project.id)}" ${project.id === selectedId ? "selected" : ""}>${clean(project.name)}${project.client ? ` — ${clean(project.client)}` : ""}</option>`
       );
       if (selectedId && !state.finance.projects.some(project => project.id === selectedId)) {
-        const oldProject = state.finance.expenses.flatMap(expenseAllocations).find(allocation => allocation.projectId === selectedId);
-        options.unshift(`<option value="${clean(selectedId)}" selected>${clean(oldProject?.projectName || "O'chirilgan zakaz")} (faol emas)</option>`);
+        options.unshift(`<option value="${clean(selectedId)}" selected>${clean(knownProjectName(selectedId))} (faol emas)</option>`);
       }
-      return `<option value="" ${selectedId ? "" : "selected"} disabled>Zakazni tanlang</option>` + options.join("");
+      const first = allowEmpty
+        ? `<option value="" ${selectedId ? "" : "selected"}>${placeholder}</option>`
+        : `<option value="" ${selectedId ? "" : "selected"} disabled>${placeholder}</option>`;
+      return first + options.join("");
     }
 
     function renderAllocationRows(allocations = null) {
       if (!el.expenseAllocations) return;
       const existingRows = allocations === null ? Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-row]")).map(row => ({
         projectId: row.querySelector("[data-allocation-project]")?.value || "",
+        fundedByProjectId: row.querySelector("[data-allocation-source]")?.value || "",
         amount: row.querySelector("[data-allocation-amount]")?.value || ""
       })) : allocations;
-      const rows = existingRows.length ? existingRows : [{ projectId: "", amount: "" }];
+      const rows = existingRows.length ? existingRows : [{ projectId: "", fundedByProjectId: "", amount: "" }];
+      const founderMode = el.eType.value === "founder_avans";
       el.expenseAllocations.innerHTML = rows.map((allocation, index) => `
-        <div class="allocation-row" data-allocation-row>
-          <label class="allocation-select-label">Zakaz ${index + 1}<select data-allocation-project required>${allocationProjectOptions(allocation.projectId || "")}</select></label>
-          <label>Ajratilgan summa (UZS)<input data-allocation-amount inputmode="decimal" value="${clean(allocation.amount)}" required /></label>
+        <div class="allocation-row${founderMode ? " no-source" : ""}" data-allocation-row>
+          <label class="allocation-select-label">${founderMode ? "Pul olingan zakaz" : "Xarajat qaysi zakaz uchun"} ${rows.length > 1 ? index + 1 : ""}<select data-allocation-project required>${allocationProjectOptions(allocation.projectId || "")}</select></label>
+          <label class="allocation-source">Pul qaysi zakazdan olindi<select data-allocation-source>${allocationProjectOptions(allocation.fundedByProjectId && allocation.fundedByProjectId !== allocation.projectId ? allocation.fundedByProjectId : "", { placeholder: "Shu zakazning o'z pulidan", allowEmpty: true })}</select></label>
+          <label>Summa (UZS)<input data-allocation-amount inputmode="decimal" value="${clean(allocation.amount)}" placeholder="0" required /></label>
           <button class="danger small-btn" type="button" data-remove-allocation aria-label="Zakaz taqsimotini o'chirish">O'chirish</button>
         </div>`).join("");
       updateAllocationTotal();
@@ -902,26 +963,33 @@
 
     function updateAllocationTotal() {
       if (!el.allocationTotal || !el.expenseAllocations) return;
-      const assigned = Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-amount]"))
-        .reduce((total, input) => total + (parseMoney(input.value) || 0), 0);
+      const assigned = roundMoney(Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-amount]"))
+        .reduce((total, input) => total + (parseMoney(input.value) || 0), 0));
       const amount = parseMoney(el.eAmount.value) || 0;
       const matches = amount > 0 && Math.abs(assigned - amount) < 0.01;
-      el.allocationTotal.textContent = `Taqsimlangan: ${fmt(assigned)} / ${fmt(amount)}${matches ? " — to'liq" : " — qolgan summa taqsimlanmagan"}`;
+      const diff = roundMoney(amount - assigned);
+      el.allocationTotal.textContent = !amount && !assigned
+        ? "Avval xarajat summasini kiriting, keyin uni zakazlarga taqsimlang."
+        : `Taqsimlangan: ${fmt(assigned)} / ${fmt(amount)}${matches ? " — to'liq" : diff > 0 ? ` — yana ${fmt(diff)} taqsimlash kerak` : ` — ${fmt(-diff)} ortiqcha taqsimlangan`}`;
       el.allocationTotal.classList.toggle("is-valid", matches);
       el.allocationTotal.classList.toggle("is-invalid", !matches);
     }
 
     function readExpenseAllocations() {
+      const founderMode = el.eType.value === "founder_avans";
       return Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-row]")).map(row => {
         const projectId = row.querySelector("[data-allocation-project]").value;
-        const project = state.finance.projects.find(item => item.id === projectId);
-        const oldAllocation = state.finance.expenses.flatMap(expenseAllocations)
-          .find(allocation => allocation.projectId === projectId);
-        return {
+        const fundedBy = founderMode ? "" : (row.querySelector("[data-allocation-source]")?.value || "");
+        const allocation = {
           projectId,
-          projectName: project?.name || oldAllocation?.projectName || "",
+          projectName: knownProjectName(projectId, ""),
           amount: parseMoney(row.querySelector("[data-allocation-amount]").value)
         };
+        if (fundedBy && fundedBy !== projectId) {
+          allocation.fundedByProjectId = fundedBy;
+          allocation.fundedByProjectName = knownProjectName(fundedBy, "");
+        }
+        return allocation;
       });
     }
 
@@ -946,68 +1014,107 @@
       return Array.from(grouped.values(), item => `${clean(item.name)}: ${fmt(item.amount)}`).join("<br>");
     }
 
-    function renderOrderExpenseSummary() {
-      const projectTotals = new Map();
-      state.finance.projects.forEach(project => projectTotals.set(project.id, {
-        project,
-        projectName: project.name,
-        expenses: 0,
-        founderAdvances: new Map()
-      }));
-      const unassigned = { expenses: 0, founderAdvances: new Map() };
-
+    // Zakazlar bo'yicha pul oqimi: xarajat (kimga tegishli) va kassa (kimning pulidan).
+    function orderFlows() {
+      const rows = new Map();
+      const ensure = (id, name) => {
+        if (!rows.has(id)) {
+          const project = state.finance.projects.find(p => p.id === id) || null;
+          rows.set(id, { id, project, name: project?.name || knownProjectName(id, name), cost: 0, founderAdvances: new Map(), received: 0, cashUsed: 0, borrowed: 0, lent: 0 });
+        }
+        return rows.get(id);
+      };
+      state.finance.projects.forEach(project => ensure(project.id, project.name));
+      state.finance.payments.forEach(payment => { if (payment.projectId) ensure(payment.projectId, payment.projectName).received += num(payment.amount); });
+      const unassigned = { cost: 0, founderAdvances: new Map() };
+      const pairs = new Map();
+      const suspicious = [];
       state.finance.expenses.forEach(expense => {
         const allocations = expenseAllocations(expense);
-        if (!allocations.length) unassigned.expenses += num(expense.amount);
+        if (!allocations.length) {
+          if (expense.type === "founder_avans") unassigned.founderAdvances.set(expense.founderId || "unknown", (unassigned.founderAdvances.get(expense.founderId || "unknown") || 0) + num(expense.amount));
+          else unassigned.cost += num(expense.amount);
+        }
         allocations.forEach(allocation => {
-          let totals = projectTotals.get(allocation.projectId);
-          if (!totals && allocation.projectId) {
-            totals = {
-              project: null,
-              projectName: allocation.projectName || "O'chirilgan zakaz",
-              expenses: 0,
-              founderAdvances: new Map()
-            };
-            projectTotals.set(allocation.projectId, totals);
-          }
-          totals = totals || unassigned;
+          const amount = num(allocation.amount);
+          const target = ensure(allocation.projectId, allocation.projectName);
+          const sourceId = allocationFundingId(expense, allocation);
+          const source = ensure(sourceId, allocation.fundedByProjectName);
+          source.cashUsed += amount;
           if (expense.type === "founder_avans") {
-            const founderKey = expense.founderId || "unknown";
-            totals.founderAdvances.set(founderKey, (totals.founderAdvances.get(founderKey) || 0) + num(allocation.amount));
-          } else {
-            totals.expenses += num(allocation.amount);
+            const key = expense.founderId || "unknown";
+            target.founderAdvances.set(key, (target.founderAdvances.get(key) || 0) + amount);
+            return;
+          }
+          target.cost += amount;
+          if (sourceId !== allocation.projectId) {
+            target.borrowed += amount;
+            source.lent += amount;
+            const key = `${sourceId}|${allocation.projectId}`;
+            pairs.set(key, (pairs.get(key) || 0) + amount);
           }
         });
+        // Izohda boshqa zakaz nomi yozilgan, lekin xarajat unga biriktirilmagan bo'lsa — ehtimol xato zakazga yozilgan.
+        const note = String(expense.note || "").toLowerCase();
+        if (note && expense.type !== "founder_avans") {
+          const linked = new Set(allocations.flatMap(a => [a.projectId, allocationFundingId(expense, a)]));
+          const mentioned = state.finance.projects.find(p => String(p.name || "").trim().length >= 3 && !linked.has(p.id) && note.includes(String(p.name).trim().toLowerCase()));
+          if (mentioned) suspicious.push({ expenseId: expense.id, projectName: mentioned.name });
+        }
       });
-
-      const rows = Array.from(projectTotals.values()).map(({ project, projectName, expenses, founderAdvances }) => {
-        const advances = Array.from(founderAdvances, ([founderId, amount]) => {
-          const name = state.finance.founders.find(f => f.id === founderId)?.name || "Noma'lum ta'sischi";
-          return `${clean(name)}: ${fmt(amount)}`;
-        }).join("<br>");
-        const advanceTotal = Array.from(founderAdvances.values()).reduce((sum, amount) => sum + amount, 0);
-        const projectAmount = project ? num(project.amount) : null;
-        const remaining = projectAmount === null ? null : projectAmount - expenses - advanceTotal;
-        return `<tr>
-          <td>${clean(projectName)}${project ? "" : " (faol emas)"}</td><td>${project ? fmt(projectAmount) : "-"}</td><td>${fmt(expenses)}</td>
-          <td>${advances || "Olinmagan"}</td><td>${fmt(expenses + advanceTotal)}</td><td>${remaining === null ? "-" : fmt(remaining)}</td>
-        </tr>`;
+      // Qarama-qarshi qarzlarni o'zaro hisoblaymiz: A→B 300, B→A 100 bo'lsa, A→B 200.
+      const borrowings = [];
+      const seen = new Set();
+      pairs.forEach((amount, key) => {
+        if (seen.has(key)) return;
+        const [from, to] = key.split("|");
+        const reverseKey = `${to}|${from}`;
+        seen.add(key); seen.add(reverseKey);
+        const net = roundMoney(amount - (pairs.get(reverseKey) || 0));
+        if (Math.abs(net) < 0.01) return;
+        borrowings.push(net > 0 ? { from, to, amount: net } : { from: to, to: from, amount: -net });
       });
+      return { rows: Array.from(rows.values()), unassigned, borrowings, suspicious };
+    }
 
-      const unassignedAdvanceTotal = Array.from(unassigned.founderAdvances.values()).reduce((sum, amount) => sum + amount, 0);
-      if (unassigned.expenses || unassignedAdvanceTotal) {
-        const advances = Array.from(unassigned.founderAdvances, ([founderId, amount]) => {
-          const name = state.finance.founders.find(f => f.id === founderId)?.name || "Noma'lum ta'sischi";
-          return `${clean(name)}: ${fmt(amount)}`;
-        }).join("<br>");
+    function renderOrderExpenseSummary() {
+      const flows = orderFlows();
+      const founderName = id => state.finance.founders.find(f => f.id === id)?.name || "Noma'lum ta'sischi";
+      const advanceText = map => Array.from(map, ([id, amount]) => `${clean(founderName(id))}: <span class="nowrap">${fmt(amount)}</span>`).join("<br>");
+      const nameOf = id => clean(flows.rows.find(r => r.id === id)?.name || knownProjectName(id));
+      const borrowNode = document.getElementById("orderBorrowings");
+      if (borrowNode) {
+        borrowNode.innerHTML = flows.borrowings.length ? `<div class="borrow-list">${flows.borrowings.map(b => `
+          <div class="borrow-item"><b>${nameOf(b.from)}</b><span class="borrow-arrow">pulidan →</span><b>${nameOf(b.to)}</b><span class="borrow-arrow">uchun ishlatilgan:</span><b>${fmt(b.amount)}</b>
+          <span class="expense-order-detail" style="flex-basis:100%;margin:0;">${nameOf(b.to)} mijozi to'laganda bu summa ${nameOf(b.from)} kassasiga qaytariladi. Foyda hisobida xarajat ${nameOf(b.to)} zakaziga yozilgan.</span></div>`).join("")}</div>` : "";
+      }
+      const rows = flows.rows
+        .filter(r => r.project || r.cost || r.founderAdvances.size || r.cashUsed || r.received)
+        .map(r => {
+          const advanceTotal = Array.from(r.founderAdvances.values()).reduce((a, v) => a + v, 0);
+          const amount = r.project ? num(r.project.amount) : null;
+          const profit = amount === null ? null : roundMoney(amount - r.cost - advanceTotal);
+          const cash = roundMoney(r.received - r.cashUsed);
+          return `<tr>
+            <td>${clean(r.name)}${r.project ? (r.project.carriedFromMonth ? `<div class="expense-order-detail">${clean(r.project.carriedFromMonth)} oyidan ko'chgan</div>` : "") : `<div class="expense-order-detail">faol emas</div>`}</td>
+            <td class="num">${amount === null ? "-" : fmt(amount)}</td>
+            <td class="num">${fmt(r.cost)}</td>
+            <td>${advanceText(r.founderAdvances) || `<span class="expense-order-detail">Olinmagan</span>`}</td>
+            <td class="num">${profit === null ? "-" : `<b>${money(profit)}</b>`}</td>
+            <td class="num">${fmt(r.received)}</td>
+            <td class="num">${r.borrowed ? `<span class="neg">${fmt(r.borrowed)}</span>` : "—"}</td>
+            <td class="num">${r.lent ? fmt(r.lent) : "—"}</td>
+            <td class="num"><b>${money(cash)}</b></td>
+          </tr>`;
+        });
+      const unassignedAdvance = Array.from(flows.unassigned.founderAdvances.values()).reduce((a, v) => a + v, 0);
+      if (flows.unassigned.cost || unassignedAdvance) {
         rows.push(`<tr>
-          <td>Umumiy / eski yozuvlar (zakaz ko'rsatilmagan)</td><td>-</td><td>${fmt(unassigned.expenses)}</td>
-          <td>${advances || "Olinmagan"}</td><td>${fmt(unassigned.expenses + unassignedAdvanceTotal)}</td><td>-</td>
+          <td>Umumiy / eski yozuvlar<div class="expense-order-detail">zakaz ko'rsatilmagan</div></td><td class="num">-</td><td class="num">${fmt(flows.unassigned.cost)}</td>
+          <td>${advanceText(flows.unassigned.founderAdvances) || "—"}</td><td class="num">-</td><td class="num">-</td><td class="num">—</td><td class="num">—</td><td class="num">-</td>
         </tr>`);
       }
-      el.orderExpensesBody.innerHTML = rows.length
-        ? rows.join("")
-        : `<tr><td colspan="6">Hozircha zakazlar yoki xarajatlar yo'q.</td></tr>`;
+      el.orderExpensesBody.innerHTML = rows.length ? rows.join("") : `<tr><td colspan="9">Hozircha zakazlar yoki xarajatlar yo'q.</td></tr>`;
     }
 
     function renderExpenses() {
@@ -1016,17 +1123,26 @@
         renderOrderExpenseSummary();
         return;
       }
+      const suspicious = new Map(orderFlows().suspicious.map(item => [item.expenseId, item.projectName]));
       el.expensesBody.innerHTML = state.finance.expenses.map((e) => {
         const worker = e.workerId ? state.finance.workers.find(w => w.id === e.workerId)?.name || e.workerName : "";
         const founder = e.founderId ? state.finance.founders.find(f => f.id === e.founderId)?.name || e.founderName : "";
         const target = worker || founder || "-";
         const allocations = expenseAllocations(e);
-        const sourceProject = allocations.length
-          ? allocations.map(allocation => `${clean(allocation.projectName || state.finance.projects.find(project => project.id === allocation.projectId)?.name || "Zakaz")} (${fmt(allocation.amount)})`).join("<br>")
+        const projectCell = allocations.length
+          ? allocations.map(allocation => {
+              const name = clean(knownProjectName(allocation.projectId, allocation.projectName));
+              const sourceId = allocationFundingId(e, allocation);
+              const borrowed = sourceId !== allocation.projectId
+                ? `<div class="expense-order-detail">puli <b>${clean(knownProjectName(sourceId, allocation.fundedByProjectName))}</b> zakazidan olingan</div>` : "";
+              return `${name} <span class="expense-order-detail">(${fmt(allocation.amount)})</span>${borrowed}`;
+            }).join("<br>")
           : "Zakaz biriktirilmagan (eski yozuv)";
+        const warning = suspicious.has(e.id)
+          ? `<div class="row-warning" title="Tahrirlash orqali to'g'ri zakazni yoki pul manbaini tanlang">⚠ Izohda «${clean(suspicious.get(e.id))}» bor — zakaz to'g'ri tanlanganini tekshiring</div>` : "";
         const paymentType = EXPENSE_PAYMENT_LABEL[e.paymentType] || (e.paymentType ? clean(e.paymentType) : "Ko'rsatilmagan");
         return `<tr>
-          <td>${clean(e.date)}</td><td>${EXPENSE_LABEL[e.type] || clean(e.type)}</td><td>${fmt(e.amount)}</td><td>${paymentType}</td><td>${clean(target)}</td><td>${sourceProject}</td><td>${clean(e.note || "-")}</td>
+          <td>${clean(e.date)}</td><td>${EXPENSE_LABEL[e.type] || clean(e.type)}</td><td class="num">${fmt(e.amount)}</td><td>${paymentType}</td><td>${clean(target)}</td><td>${projectCell}${warning}</td><td>${clean(e.note || "-")}</td>
           <td>
             <button class="ghost small-btn" type="button" data-edit-e="${clean(e.id)}">Tahrirlash</button>
             <button class="danger small-btn" type="button" data-del-e="${clean(e.id)}">O'chirish</button>
@@ -1048,6 +1164,7 @@
         if (e.workerId) el.eWorkerId.value = e.workerId;
         if (e.founderId) el.eFounderId.value = e.founderId;
         setFormEditMode(el.expenseForm, el.expenseSubmitBtn, el.expenseCancelEdit, true);
+        el.expenseForm.scrollIntoView({ behavior: "smooth", block: "start" });
       }));
       renderOrderExpenseSummary();
     }
@@ -1291,71 +1408,185 @@
         }), { income: 0, expenses: 0, founderAdvances: 0, paymentCount: 0, expenseCount: 0 });
     }
 
-    function drawCompareChart(canvas, legend, rows) {
-      if (!canvas || !legend) return;
-      fitCanvas(canvas);
-      const ctx = canvas.getContext("2d");
-      const width = canvas.width, height = canvas.height;
-      ctx.clearRect(0, 0, width, height);
-      const max = Math.max(1, ...rows.flatMap(row => [row.income, row.expenses]));
-      const scale = max >= 1000000 ? 1000000 : max >= 1000 ? 1000 : 1;
-      const suffix = scale === 1000000 ? "m" : scale === 1000 ? "k" : "";
-      const left = 56, right = 16, top = 18, bottom = 40;
-      const chartWidth = width - left - right, chartHeight = height - top - bottom;
-      const groupWidth = chartWidth / Math.max(rows.length, 1);
-      const barWidth = Math.min(24, groupWidth * 0.28);
-      ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue("--line").trim() || "#d9e1ec";
-      ctx.fillStyle = getComputedStyle(document.body).getPropertyValue("--muted").trim() || "#64748b";
-      ctx.font = "11px Segoe UI";
-      ctx.textAlign = "right";
-      for (let tick = 0; tick <= 4; tick++) {
-        const y = top + chartHeight - chartHeight * tick / 4;
-        ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(width - right, y); ctx.stroke();
-        const tickValue = max * tick / 4 / scale;
-        ctx.fillText(`${scale === 1 ? Math.round(tickValue) : tickValue.toFixed(1)}${suffix}`, left - 7, y + 4);
-      }
-      rows.forEach((row, index) => {
-        const center = left + groupWidth * (index + 0.5);
-        const incomeHeight = row.income / max * chartHeight;
-        const expenseHeight = row.expenses / max * chartHeight;
-        ctx.fillStyle = "#0875d1";
-        ctx.fillRect(center - barWidth - 2, top + chartHeight - incomeHeight, barWidth, incomeHeight);
-        ctx.fillStyle = "#e63946";
-        ctx.fillRect(center + 2, top + chartHeight - expenseHeight, barWidth, expenseHeight);
-        ctx.fillStyle = getComputedStyle(document.body).getPropertyValue("--muted").trim() || "#64748b";
-        ctx.textAlign = "center";
-        ctx.fillText(row.label.slice(0, 3), center, height - 14);
-      });
-      legend.innerHTML = `<span><i class="dot" style="background:#0875d1"></i>Daromad</span><span><i class="dot" style="background:#e63946"></i>Xarajat</span>`;
+    // ---------- Diagramma dvigateli (canvas, HiDPI, tooltip) ----------
+    const CHART_FONT = '"Inter", "Segoe UI", system-ui, sans-serif';
+    function compactMoney(value) {
+      const abs = Math.abs(value), sign = value < 0 ? "−" : "";
+      const short = (v) => (Math.round(v * 10) / 10).toString().replace(".", ",");
+      if (abs >= 1e9) return `${sign}${short(abs / 1e9)} mlrd`;
+      if (abs >= 1e6) return `${sign}${short(abs / 1e6)} mln`;
+      if (abs >= 1e3) return `${sign}${short(abs / 1e3)} ming`;
+      return `${sign}${Math.round(abs)}`;
     }
+    function chartColors() {
+      const cs = getComputedStyle(document.body);
+      const v = (name) => cs.getPropertyValue(name).trim();
+      return {
+        surface: v("--surface"), grid: v("--chart-grid"), axis: v("--chart-axis"), text: v("--text"), text2: v("--text-2"),
+        s1: v("--series-1"), s2: v("--series-2"), s3: v("--series-3"), s4: v("--series-4"), neg: v("--negative")
+      };
+    }
+    function prepareCanvas(canvas) {
+      if (!canvas || !canvas.offsetParent) return null; // yashirin sahifa: ochilganda chiziladi
+      const height = Number(canvas.dataset.height) || 260;
+      const width = Math.max(Math.round(canvas.getBoundingClientRect().width), 240);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.style.height = `${height}px`;
+      if (canvas.width !== Math.round(width * dpr)) canvas.width = Math.round(width * dpr);
+      if (canvas.height !== Math.round(height * dpr)) canvas.height = Math.round(height * dpr);
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      ctx.textBaseline = "middle";
+      ctx.font = `12px ${CHART_FONT}`;
+      canvas._hits = [];
+      bindChartHover(canvas);
+      return { ctx, width, height, c: chartColors() };
+    }
+    // Ustun: ma'lumot uchi 4px yumaloq, asosi to'g'ri burchak.
+    function barPath(ctx, x, y, w, h, direction = "up") {
+      const r = Math.min(4, Math.abs(w) / 2, Math.abs(h));
+      ctx.beginPath();
+      if (direction === "up") {
+        ctx.moveTo(x, y + h); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r); ctx.lineTo(x + w, y + h);
+      } else if (direction === "right") {
+        ctx.moveTo(x, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x, y + h);
+      } else { // left
+        ctx.moveTo(x + w, y); ctx.lineTo(x + r, y); ctx.quadraticCurveTo(x, y, x, y + r);
+        ctx.lineTo(x, y + h - r); ctx.quadraticCurveTo(x, y + h, x + r, y + h); ctx.lineTo(x + w, y + h);
+      }
+      ctx.closePath();
+    }
+    function niceStep(max, count = 4) {
+      if (max <= 0) return 1;
+      const raw = max / count, mag = 10 ** Math.floor(Math.log10(raw)), norm = raw / mag;
+      return (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
+    }
+    function emptyChart(p, text = "Bu davrda ma'lumot yo'q") {
+      p.ctx.fillStyle = p.c.axis; p.ctx.textAlign = "center"; p.ctx.font = `13px ${CHART_FONT}`;
+      p.ctx.fillText(text, p.width / 2, p.height / 2);
+    }
+    let chartTipNode = null;
+    function chartTip() {
+      if (!chartTipNode) {
+        chartTipNode = document.createElement("div");
+        chartTipNode.className = "chart-tooltip";
+        chartTipNode.setAttribute("role", "status");
+        document.body.appendChild(chartTipNode);
+        window.addEventListener("scroll", hideChartTip, { passive: true });
+      }
+      return chartTipNode;
+    }
+    function hideChartTip() { if (chartTipNode) chartTipNode.classList.remove("show"); }
+    const tipRow = (color, label, value) => `<div class="tt-row"><span>${color ? `<i class="dot" style="background:${color}"></i>` : ""}${label}</span><b>${value}</b></div>`;
+    function bindChartHover(canvas) {
+      if (canvas._hoverBound) return;
+      canvas._hoverBound = true;
+      const show = (event) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left, y = event.clientY - rect.top;
+        const hit = (canvas._hits || []).find(h => h.test ? h.test(x, y) : x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h);
+        if (!hit) return hideChartTip();
+        const tip = chartTip();
+        tip.innerHTML = hit.html;
+        tip.classList.add("show");
+        const w = tip.offsetWidth, h = tip.offsetHeight;
+        let left = event.clientX + 14, top = event.clientY - h - 12;
+        if (left + w > window.innerWidth - 8) left = event.clientX - w - 14;
+        if (top < 8) top = event.clientY + 16;
+        tip.style.left = `${Math.max(8, left)}px`;
+        tip.style.top = `${top}px`;
+      };
+      canvas.addEventListener("pointermove", show);
+      canvas.addEventListener("pointerdown", show);
+      canvas.addEventListener("pointerleave", hideChartTip);
+    }
+
+    // Daromad va xarajat ustunlari (12 oy). Tanlangan oy ajratib ko'rsatiladi.
+    function drawCompareChart(canvas, legend, rows, highlightMonth = null) {
+      if (!canvas) return;
+      const totalIncome = rows.filter(r => !highlightMonth || r.month === highlightMonth).reduce((a, r) => a + r.income, 0);
+      const totalExpense = rows.filter(r => !highlightMonth || r.month === highlightMonth).reduce((a, r) => a + r.expenses, 0);
+      const colors = chartColors();
+      if (legend) legend.innerHTML = `<span><i class="dot" style="background:${colors.s1}"></i>Daromad <b>${fmt(totalIncome)}</b></span><span><i class="dot" style="background:${colors.s2}"></i>Xarajat <b>${fmt(totalExpense)}</b></span>`;
+      const p = prepareCanvas(canvas);
+      if (!p) return;
+      const { ctx, width, height, c } = p;
+      const max = Math.max(0, ...rows.flatMap(r => [r.income, r.expenses]));
+      if (!max) return emptyChart(p);
+      const left = 62, right = 10, top = 12, bottom = 28;
+      const plotW = width - left - right, plotH = height - top - bottom;
+      const step = niceStep(max), ticks = Math.max(1, Math.ceil(max / step)), scaleMax = step * ticks;
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= ticks; i++) {
+        const y = Math.round(top + plotH - plotH * i / ticks) + .5;
+        ctx.strokeStyle = c.grid; ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(width - right, y); ctx.stroke();
+        ctx.fillStyle = c.axis; ctx.textAlign = "right"; ctx.font = `11px ${CHART_FONT}`;
+        ctx.fillText(compactMoney(step * i), left - 8, y);
+      }
+      const groupW = plotW / rows.length;
+      const barW = Math.max(3, Math.min(24, (groupW - 10) / 2));
+      rows.forEach((row, index) => {
+        const cx = left + groupW * (index + .5);
+        const active = !highlightMonth || row.month === highlightMonth;
+        if (highlightMonth && row.month === highlightMonth) {
+          ctx.fillStyle = c.grid; ctx.globalAlpha = .55; ctx.fillRect(cx - groupW / 2 + 2, top, groupW - 4, plotH); ctx.globalAlpha = 1;
+        }
+        ctx.globalAlpha = active ? 1 : .35;
+        [[row.income, c.s1, cx - 1 - barW], [row.expenses, c.s2, cx + 1]].forEach(([value, color, x]) => {
+          if (value <= 0) return;
+          const h = Math.max(2, value / scaleMax * plotH);
+          ctx.fillStyle = color; barPath(ctx, x, top + plotH - h, barW, h, "up"); ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = active ? c.text2 : c.axis; ctx.textAlign = "center";
+        ctx.font = `${active && highlightMonth ? "600 " : ""}11px ${CHART_FONT}`;
+        ctx.fillText(groupW < 34 ? row.label.slice(0, 1) : row.label.slice(0, 3), cx, height - 12);
+        const net = row.income - row.expenses;
+        canvas._hits.push({ x: cx - groupW / 2, y: top, w: groupW, h: plotH + bottom, html:
+          `<div class="tt-title">${row.label} ${row.month.slice(0, 4)}</div>${tipRow(c.s1, "Daromad", fmt(row.income))}${tipRow(c.s2, "Xarajat", fmt(row.expenses))}${tipRow("", "Sof foyda", `<span class="${net < 0 ? "neg" : ""}">${fmt(net)}</span>`)}${row.founderAdvances ? tipRow("", "Ta'sischi avansi", fmt(row.founderAdvances)) : ""}` });
+      });
+      ctx.strokeStyle = c.axis; ctx.globalAlpha = .5; ctx.beginPath(); ctx.moveTo(left, top + plotH + .5); ctx.lineTo(width - right, top + plotH + .5); ctx.stroke(); ctx.globalAlpha = 1;
+    }
+
+    const kpiCard = (item) => `<div class="kpi card ${item.cls}"><div><h3>${item.title}</h3><div class="v${item.negative ? " is-negative" : ""}">${item.value}</div></div><div class="meta">${item.meta}</div></div>`;
 
     function renderDashboardPeriod() {
       if (!el.dashboardYear || !el.dashboardMonth) return;
       const year = el.dashboardYear.value;
       const month = el.dashboardMonth.value;
       const totals = selectedPeriodTotals(year, month);
-      const monthlyRows = monthsForYear(year).filter(row => month === "all" || row.month.endsWith(`-${month}`));
       const periodName = month === "all" ? `${year}-yil` : `${MONTH_LABELS[Number(month) - 1]} ${year}`;
-      const net = totals.income - totals.expenses;
+      const net = roundMoney(totals.income - totals.expenses);
       const projectCount = state.finance.projects.length;
       const unpaid = state.finance.projects.reduce((sum, project) => sum + Math.max(num(project.amount) - num(project.advance), 0), 0);
-      const completed = state.finance.projects.filter(project => project.status === "Yakunlangan").length;
+      const debtors = state.finance.projects.filter(project => num(project.amount) - num(project.advance) > 0.01).length;
+      const statuses = state.finance.projects.map(liveStatus);
+      const count = (s) => statuses.filter(x => x === s).length;
+      const completed = count("Yakunlangan");
       const active = Math.max(projectCount - completed, 0);
       el.kpiGrid.innerHTML = [
-        { title: "Daromad", value: fmt(totals.income), meta: periodName, cls: "income" },
-        { title: "Xarajat", value: fmt(totals.expenses), meta: periodName, cls: "warn-kpi" },
-        { title: "Sof foyda", value: fmt(net), meta: periodName, cls: net < 0 ? "danger-kpi" : "profit-kpi" },
-        { title: "Faol loyihalar", value: active, meta: `${projectCount} ta joriy loyiha`, cls: "income" },
-        { title: "Tugallangan", value: completed, meta: "Joriy loyihalar", cls: "cash" },
-        { title: "Qarzdorlik", value: fmt(unpaid), meta: "Yig'ilishi kerak", cls: "danger-kpi" }
-      ].map(item => `<div class="kpi card ${item.cls}"><div><h3>${item.title}</h3><div class="v">${item.value}</div></div><div class="meta">${item.meta}</div></div>`).join("");
-      el.dashboardChartCaption.textContent = `${periodName} uchun daromad va xarajatlar`;
+        { title: "Daromad (tushgan pul)", value: fmt(totals.income), meta: `${periodName} · ${totals.paymentCount} ta to'lov`, cls: "income" },
+        { title: "Xarajat", value: fmt(totals.expenses), meta: `${periodName} · ${totals.expenseCount} ta yozuv`, cls: "warn-kpi" },
+        { title: "Sof foyda (kassa)", value: fmt(net), meta: net < 0 ? "Xarajat daromaddan ko'p" : "Daromad − xarajat", cls: net < 0 ? "danger-kpi" : "profit-kpi", negative: net < 0 },
+        { title: "Ta'sischi avanslari", value: fmt(totals.founderAdvances), meta: "Foydadan olingan, xarajatga kirmaydi", cls: "neutral-kpi" },
+        { title: "Mijozlar qarzi", value: fmt(unpaid), meta: `${debtors} ta zakaz bo'yicha yig'ilishi kerak`, cls: "danger-kpi" },
+        { title: "Loyihalar", value: `${active} <span style="font-size:14px;font-weight:600;color:var(--muted)">faol</span>`, meta: `${completed} ta tugallangan · jami ${projectCount} ta`, cls: "cash" }
+      ].map(kpiCard).join("");
+      el.dashboardChartCaption.textContent = month === "all" ? `${year}-yil, oylar bo'yicha` : `${periodName} ajratib ko'rsatilgan`;
+      const c = chartColors();
+      const statusDefs = [
+        ["Yangi", "var(--info)"], ["Jarayonda", "var(--warn)"], ["Topshirish vaqti", c.s4],
+        ["Kechiktirilgan zakaz", "var(--danger)"], ["Yakunlangan", "var(--ok)"]
+      ];
+      const bar = projectCount ? statusDefs.filter(([s]) => count(s)).map(([s, color]) => `<span title="${s}: ${count(s)}" style="width:${count(s) / projectCount * 100}%;background:${color}"></span>`).join("") : "";
       el.projectStatusSummary.innerHTML = `
-        <div class="status-stat"><span>Faol</span><strong>${active}</strong></div>
-        <div class="status-stat"><span>Tugallangan</span><strong>${completed}</strong></div>
-        <div class="status-stat"><span>Ochiq qarzdorlik</span><strong>${fmt(unpaid)}</strong></div>
-        <div class="status-stat"><span>Davr to'lovlari</span><strong>${totals.paymentCount}</strong></div>`;
-      drawCompareChart(el.financeTrendChart, el.financeTrendLegend, monthlyRows);
+        <div class="status-bar" role="img" aria-label="Loyihalar holati">${bar}</div>
+        ${statusDefs.map(([s, color]) => `<div class="status-stat"><span><i class="dot" style="background:${color}"></i> ${s === "Kechiktirilgan zakaz" ? "Kechikkan" : s}</span><strong>${count(s)}</strong></div>`).join("")}
+        <div class="status-stat"><span>Ochiq qarzdorlik</span><strong>${fmt(unpaid)}</strong></div>`;
+      drawCompareChart(el.financeTrendChart, el.financeTrendLegend, monthsForYear(year), month === "all" ? null : `${year}-${month}`);
     }
 
     function renderReports() {
@@ -1365,20 +1596,20 @@
       const months = monthsForYear(year);
       const totals = selectedPeriodTotals(year, month);
       const periodName = month === "all" ? `${year}-yil` : `${MONTH_LABELS[Number(month) - 1]} ${year}`;
-      const net = totals.income - totals.expenses;
+      const net = roundMoney(totals.income - totals.expenses);
       const margin = totals.income ? net / totals.income * 100 : 0;
       el.reportKpis.innerHTML = [
-        { title: "Umumiy daromad", value: fmt(totals.income), meta: periodName, cls: "income" },
-        { title: "Umumiy xarajat", value: fmt(totals.expenses), meta: periodName, cls: "warn-kpi" },
-        { title: "Sof foyda", value: fmt(net), meta: periodName, cls: net < 0 ? "danger-kpi" : "profit-kpi" },
-        { title: "Foyda marjasi", value: `${margin.toFixed(1)}%`, meta: `${totals.paymentCount} ta tushum`, cls: "cash" },
+        { title: "Umumiy daromad", value: fmt(totals.income), meta: `${periodName} · ${totals.paymentCount} ta tushum`, cls: "income" },
+        { title: "Umumiy xarajat", value: fmt(totals.expenses), meta: `${periodName} · ${totals.expenseCount} ta yozuv`, cls: "warn-kpi" },
+        { title: "Sof foyda", value: fmt(net), meta: periodName, cls: net < 0 ? "danger-kpi" : "profit-kpi", negative: net < 0 },
+        { title: "Foyda marjasi", value: `${margin.toFixed(1).replace(".", ",")}%`, meta: "Sof foyda ÷ daromad", cls: "cash", negative: margin < 0 },
         { title: "Ta'sischi avanslari", value: fmt(totals.founderAdvances), meta: "Foydadan olingan, xarajatga kirmaydi", cls: "neutral-kpi" }
-      ].map(item => `<div class="kpi card ${item.cls}"><div><h3>${item.title}</h3><div class="v">${item.value}</div></div><div class="meta">${item.meta}</div></div>`).join("");
-      el.reportMonthsBody.innerHTML = months
-        .filter(row => month === "all" || row.month.endsWith(`-${month}`))
-        .map(row => `<tr><td>${row.label}</td><td>${fmt(row.income)}</td><td>${fmt(row.expenses)}</td><td>${fmt(row.income - row.expenses)}</td><td>${fmt(row.founderAdvances)}</td><td>${row.paymentCount}</td><td>${row.expenseCount}</td></tr>`)
-        .join("") || `<tr><td colspan="7">Tanlangan davrda yozuv yo'q.</td></tr>`;
-      drawCompareChart(el.reportTrendChart, el.reportTrendLegend, months);
+      ].map(kpiCard).join("");
+      const visible = months.filter(row => month === "all" || row.month.endsWith(`-${month}`));
+      el.reportMonthsBody.innerHTML = visible
+        .map(row => `<tr><td>${row.label}</td><td class="num">${fmt(row.income)}</td><td class="num">${fmt(row.expenses)}</td><td class="num">${money(row.income - row.expenses)}</td><td class="num">${fmt(row.founderAdvances)}</td><td class="num">${row.paymentCount}</td><td class="num">${row.expenseCount}</td></tr>`)
+        .join("") + (visible.length > 1 ? `<tr class="archive-expense-row"><td>Jami</td><td class="num">${fmt(totals.income)}</td><td class="num">${fmt(totals.expenses)}</td><td class="num">${money(net)}</td><td class="num">${fmt(totals.founderAdvances)}</td><td class="num">${totals.paymentCount}</td><td class="num">${totals.expenseCount}</td></tr>` : "");
+      drawCompareChart(el.reportTrendChart, el.reportTrendLegend, months, month === "all" ? null : `${year}-${month}`);
     }
 
     function csvCell(value) {
@@ -1407,7 +1638,7 @@
           } else {
             const allocations = expenseAllocations(record);
             const projectLabel = allocations.length
-              ? allocations.map(allocation => `${allocation.projectName || state.finance.projects.find(project => project.id === allocation.projectId)?.name || "Zakaz"} (${num(allocation.amount)})`).join("; ")
+              ? allocations.map(allocation => `${knownProjectName(allocation.projectId, allocation.projectName)} (${num(allocation.amount)})${allocation.fundedByProjectId && record.type !== "founder_avans" ? ` — puli ${knownProjectName(allocation.fundedByProjectId, allocation.fundedByProjectName)} zakazidan` : ""}`).join("; ")
               : "Eski yozuv: zakaz biriktirilmagan";
             const worker = state.finance.workers.find(item => item.id === record.workerId)?.name || record.workerName || "";
             const founder = state.finance.founders.find(item => item.id === record.founderId)?.name || record.founderName || "";
@@ -1427,83 +1658,111 @@
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
+    // Halqa diagramma: bo'laklar orasida 2px fon rangidagi oraliq, markazda jami summa.
     function drawDonut(canvas, legendNode, items) {
-      fitCanvas(canvas);
-      const ctx = canvas.getContext("2d");
-      const w = canvas.width, h = canvas.height;
-      ctx.clearRect(0, 0, w, h);
       const total = items.reduce((a, i) => a + i.value, 0);
-      const cx = w / 2, cy = h / 2, r = Math.min(w, h) * 0.34, inner = r * 0.6;
-      if (!total) { ctx.fillStyle = "#3d5f4f"; ctx.font = "13px Segoe UI"; ctx.textAlign = "center"; ctx.fillText("Ma'lumot yo'q", cx, cy); legendNode.innerHTML = "<span>Ma'lumot yo'q</span>"; return; }
+      legendNode.innerHTML = total
+        ? items.map((it) => `<span><i class="dot" style="background:${it.color}"></i>${it.label} <b>${fmt(it.value)}</b> <em>${(it.value / total * 100).toFixed(1).replace(".", ",")}%</em></span>`).join("")
+        : "";
+      const p = prepareCanvas(canvas);
+      if (!p) return;
+      const { ctx, width, height, c } = p;
+      if (!total) return emptyChart(p, "Hali to'lov tushmagan");
+      const cx = width / 2, cy = height / 2, r = Math.min(width, height) / 2 - 6, inner = r * .64;
       let start = -Math.PI / 2;
-      items.forEach((it) => {
-        const a = (it.value / total) * Math.PI * 2;
-        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, start, start + a); ctx.closePath(); ctx.fillStyle = it.color; ctx.fill(); start += a;
+      const segments = [];
+      items.filter(it => it.value > 0).forEach((it) => {
+        const angle = it.value / total * Math.PI * 2;
+        ctx.beginPath(); ctx.arc(cx, cy, r, start, start + angle); ctx.arc(cx, cy, inner, start + angle, start, true); ctx.closePath();
+        ctx.fillStyle = it.color; ctx.fill();
+        if (angle < Math.PI * 2 - .001) { ctx.strokeStyle = c.surface; ctx.lineWidth = 2; ctx.stroke(); }
+        segments.push({ ...it, start, end: start + angle });
+        start += angle;
       });
-      ctx.globalCompositeOperation = "destination-out"; ctx.beginPath(); ctx.arc(cx, cy, inner, 0, Math.PI * 2); ctx.fill(); ctx.globalCompositeOperation = "source-over";
-      ctx.fillStyle = "#214435"; ctx.font = "700 14px Segoe UI"; ctx.textAlign = "center"; ctx.fillText(fmt(total), cx, cy + 4);
-      legendNode.innerHTML = items.map((it) => `<span><i class="dot" style="background:${it.color}"></i>${it.label}: ${fmt(it.value)}</span>`).join("");
-    }
-    function drawBars(canvas, legendNode, items, money = false) {
-      fitCanvas(canvas);
-      const ctx = canvas.getContext("2d");
-      const w = canvas.width, h = canvas.height;
-      ctx.clearRect(0, 0, w, h);
-      if (!items.length || items.every(i => i.value <= 0)) {
-        ctx.fillStyle = "#3d5f4f"; ctx.font = "13px Segoe UI"; ctx.textAlign = "center"; ctx.fillText("Ma'lumot yo'q", w / 2, h / 2); legendNode.innerHTML = "<span>Ma'lumot yo'q</span>"; return;
-      }
-      const left = 58, top = 22, right = 18, bottom = 50, cw = w - left - right, ch = h - top - bottom;
-      const max = Math.max(...items.map(i => i.value), 1), bw = cw / items.length * 0.58;
-      ctx.strokeStyle = "#d9e8e0"; ctx.beginPath(); ctx.moveTo(left, top); ctx.lineTo(left, top + ch); ctx.lineTo(left + cw, top + ch); ctx.stroke();
-      items.forEach((it, i) => {
-        const x = left + (i + 0.5) * (cw / items.length) - bw / 2, bh = (it.value / max) * ch, y = top + ch - bh;
-        ctx.fillStyle = it.color; ctx.fillRect(x, y, bw, bh);
-        ctx.fillStyle = "#1f4334"; ctx.font = "10px Segoe UI"; ctx.textAlign = "center";
-        const scale = it.value >= 1000000 ? 1000000 : it.value >= 1000 ? 1000 : 1;
-        const suffix = scale === 1000000 ? "m" : scale === 1000 ? "k" : "";
-        const t = money ? `${scale === 1 ? Math.round(it.value) : (it.value / scale).toFixed(1)}${suffix}` : String(it.value);
-        ctx.fillText(t, x + bw / 2, y - 4); ctx.fillStyle = "#355848"; ctx.fillText(it.label, x + bw / 2, top + ch + 15);
-      });
-      legendNode.innerHTML = items.map((it) => `<span><i class="dot" style="background:${it.color}"></i>${it.label}: ${money ? fmt(it.value) : it.value}</span>`).join("");
+      ctx.textAlign = "center"; ctx.fillStyle = c.text; ctx.font = `700 18px ${CHART_FONT}`;
+      ctx.fillText(compactMoney(total), cx, cy - 7);
+      ctx.fillStyle = c.axis; ctx.font = `12px ${CHART_FONT}`; ctx.fillText("jami tushum", cx, cy + 13);
+      const hit = {
+        test: (x, y) => {
+          const d = Math.hypot(x - cx, y - cy);
+          if (d < inner || d > r + 4) return false;
+          let a = Math.atan2(y - cy, x - cx);
+          if (a < -Math.PI / 2) a += Math.PI * 2;
+          const seg = segments.find(s => a >= s.start && a < s.end);
+          if (seg) hit.html = `<div class="tt-title">${seg.label}</div>${tipRow(seg.color, "Summa", fmt(seg.value))}${tipRow("", "Ulushi", `${(seg.value / total * 100).toFixed(1).replace(".", ",")}%`)}`;
+          return !!seg;
+        }
+      };
+      canvas._hits.push(hit);
     }
 
-    function fitCanvas(canvas) {
-      const box = canvas.getBoundingClientRect();
-      const width = Math.max(Math.round(box.width), 360);
-      const height = Math.max(Math.round(box.height), 245);
-      if (canvas.width !== width || canvas.height !== height) {
-        canvas.width = width;
-        canvas.height = height;
+    // Gorizontal ustunlar. diverging=true bo'lsa nol chizig'idan o'ngga (musbat) va chapga (manfiy, qizil).
+    function drawHBars(canvas, items, { diverging = false, tooltip } = {}) {
+      canvas.dataset.height = String(Math.max(120, items.length * 38 + 16));
+      const p = prepareCanvas(canvas);
+      if (!p) return;
+      const { ctx, width, c } = p;
+      if (!items.length || items.every(i => !i.value)) return emptyChart(p);
+      const labelW = Math.min(150, Math.max(90, width * .28)), valueW = 104, top = 8, rowH = 38, barH = 18;
+      const x0 = labelW + 10, plotW = Math.max(40, width - x0 - valueW);
+      const min = diverging ? Math.min(0, ...items.map(i => i.value)) : 0;
+      const max = Math.max(0, ...items.map(i => i.value));
+      const span = (max - min) || 1;
+      const zeroX = x0 + (-min) / span * plotW;
+      items.forEach((it, i) => {
+        const y = top + i * rowH, cy = y + rowH / 2;
+        ctx.fillStyle = c.text2; ctx.textAlign = "left"; ctx.font = `12.5px ${CHART_FONT}`;
+        let label = it.label;
+        while (ctx.measureText(label).width > labelW && label.length > 3) label = label.slice(0, -2);
+        ctx.fillText(label === it.label ? label : `${label}…`, 0, cy);
+        const w = Math.abs(it.value) / span * plotW;
+        const negative = it.value < 0;
+        if (w > 0) {
+          ctx.fillStyle = negative ? c.neg : (it.color || c.s1);
+          barPath(ctx, negative ? zeroX - w : zeroX, cy - barH / 2, Math.max(w, 2), barH, negative ? "left" : "right");
+          ctx.fill();
+        }
+        ctx.fillStyle = negative ? c.neg : c.text; ctx.textAlign = "right"; ctx.font = `600 12.5px ${CHART_FONT}`;
+        ctx.fillText(fmt(it.value), width, cy);
+        canvas._hits.push({ x: 0, y, w: width, h: rowH, html: tooltip ? tooltip(it) : `<div class="tt-title">${it.label}</div>${tipRow(it.color || c.s1, "Summa", fmt(it.value))}` });
+      });
+      if (diverging && min < 0) {
+        ctx.strokeStyle = c.axis; ctx.lineWidth = 1; ctx.beginPath();
+        ctx.moveTo(Math.round(zeroX) + .5, top); ctx.lineTo(Math.round(zeroX) + .5, top + items.length * rowH); ctx.stroke();
       }
     }
 
     function drawCharts() {
       const s = summary();
+      const c = chartColors();
       // Haqiqatda tushgan to'lovlar bo'yicha (zakaz summasi hali olinmagan pulni ham qo'shib yuborardi).
       const byType = {};
       state.finance.payments.forEach((p) => { byType[p.paymentType] = (byType[p.paymentType] || 0) + num(p.amount); });
       drawDonut(el.paymentChart, el.paymentLegend, [
-        { label: "Naqd", value: byType["Naqd"] || 0, color: "#0f7a56" },
-        { label: "Karta", value: byType["Karta"] || 0, color: "#26a77a" },
-        { label: "Bank", value: byType["Bank o'tkazma"] || 0, color: "#54c29f" },
-        { label: "Aralash", value: byType["Aralash"] || 0, color: "#8edec4" }
+        { label: "Naqd", value: byType["Naqd"] || 0, color: c.s1 },
+        { label: "Karta", value: byType["Karta"] || 0, color: c.s2 },
+        { label: "Bank o'tkazma", value: byType["Bank o'tkazma"] || 0, color: c.s3 },
+        { label: "Aralash", value: byType["Aralash"] || 0, color: c.s4 }
       ]);
-      const exp = s.expenseByType;
-      drawBars(el.expenseChart, el.expenseLegend, [
-        { label: "Banner", value: exp.banner || 0, color: "#4e89d8" },
-        { label: "Arakal", value: exp.arakal || 0, color: "#6d9de0" },
-        { label: "Rezka", value: exp.rezka || 0, color: "#8ab0e8" },
-        { label: "Reyka", value: exp.reyka || 0, color: "#a7c4f0" },
-        { label: "Dostavka", value: exp.dostavka || 0, color: "#62b890" },
-        { label: "Zapravka", value: exp.zapravka || 0, color: "#f27c4b" },
-        { label: "Suv", value: exp.suv || 0, color: "#28b3de" },
-        { label: "Oylik Avans", value: exp.oylik_avans || 0, color: "#f0a428" }
-      ], true);
-      drawBars(el.founderChart, el.founderLegend, s.founderRows.map((f, i) => ({
-        label: clean(f.name) || "T" + (i + 1),
-        value: f.final,
-        color: ["#0f7a56", "#26a77a", "#54c29f", "#7ad2b2", "#9fe2c6"][i % 5]
-      })), true);
+      // Barcha xarajat turlari (avval "Boshqa" va "Ishchi oyligi" diagrammada yo'q edi).
+      const expenseTotal = REAL_EXPENSE_TYPES.reduce((a, t) => a + (s.expenseByType[t] || 0), 0);
+      const expenseItems = REAL_EXPENSE_TYPES
+        .map(type => ({ label: EXPENSE_LABEL[type], value: roundMoney(s.expenseByType[type] || 0) }))
+        .filter(item => item.value > 0)
+        .sort((a, b) => b.value - a.value);
+      drawHBars(el.expenseChart, expenseItems, {
+        tooltip: (it) => `<div class="tt-title">${it.label}</div>${tipRow(c.s1, "Summa", fmt(it.value))}${tipRow("", "Ulushi", `${(it.value / (expenseTotal || 1) * 100).toFixed(1).replace(".", ",")}%`)}`
+      });
+      el.expenseLegend.innerHTML = expenseItems.length ? `<span>Jami xarajat: <b>${fmt(expenseTotal)}</b></span>` : "";
+      drawHBars(el.founderChart, s.founderRows.map(f => ({ label: f.name || "Ta'sischi", value: f.final, row: f })), {
+        diverging: true,
+        tooltip: (it) => `<div class="tt-title">${clean(it.label)} — ${num(it.row.share).toFixed(2)}%</div>${tipRow("", "Foydadagi ulushi", fmt(it.row.base))}${tipRow("", "Olgan avansi", fmt(it.row.founderAdvance))}${tipRow(it.value < 0 ? c.neg : c.s1, it.value < 0 ? "Kompaniyaga qarzdor" : "Olishi kerak", fmt(Math.abs(it.value)))}`
+      });
+      el.founderLegend.innerHTML = s.founderRows.length
+        ? `<span><i class="dot" style="background:${c.s1}"></i>Olishi kerak</span><span><i class="dot" style="background:${c.neg}"></i>Kompaniyaga qarzdor (zarar yoki ortiqcha avans)</span>`
+        : "";
+      drawCompareChart(el.financeTrendChart, el.financeTrendLegend, monthsForYear(el.dashboardYear.value), el.dashboardMonth.value === "all" ? null : `${el.dashboardYear.value}-${el.dashboardMonth.value}`);
+      drawCompareChart(el.reportTrendChart, el.reportTrendLegend, monthsForYear(el.reportYear.value), el.reportMonth.value === "all" ? null : `${el.reportYear.value}-${el.reportMonth.value}`);
     }
 
     function renderUsersTable() {
@@ -2047,10 +2306,9 @@
         if (allocations.some(allocation => !Number.isFinite(allocation.amount))) return msg(el.expenseMsg, "Zakazga ajratilgan summani raqam bilan kiriting.", "err");
         const uniqueProjectIds = new Set(allocations.map(allocation => allocation.projectId));
         const allocationTotal = roundMoney(allocations.reduce((sum, allocation) => sum + allocation.amount, 0));
-        const invalidProject = allocations.some(allocation =>
-          !state.finance.projects.some(project => project.id === allocation.projectId) &&
-          !expenseAllocations(existingExpense || {}).some(previous => previous.projectId === allocation.projectId)
-        );
+        const previousIds = new Set(expenseAllocations(existingExpense || {}).flatMap(previous => [previous.projectId, previous.fundedByProjectId]).filter(Boolean));
+        const knownId = id => state.finance.projects.some(project => project.id === id) || previousIds.has(id);
+        const invalidProject = allocations.some(allocation => !knownId(allocation.projectId) || (allocation.fundedByProjectId && !knownId(allocation.fundedByProjectId)));
         if (!allocations.length || invalidProject || allocations.some(allocation => !allocation.projectId || allocation.amount <= 0) ||
             uniqueProjectIds.size !== allocations.length || Math.abs(allocationTotal - expenseAmount) >= 0.01) {
           return msg(el.expenseMsg, "Xarajat summasini takrorlanmagan zakazlarga to'liq taqsimlang.", "err");
@@ -2188,6 +2446,8 @@
       el.measurementDate.value = today();
       el.measurementWorker.value = state.currentUser?.username || "";
       toggleExpenseTypeInputs();
+      let resizeTimer;
+      window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (state.currentUser) drawCharts(); }, 150); });
       await bootSession();
       window.setInterval(async () => {
         if (!state.currentUser || !localStorage.getItem(TOKEN_KEY)) return;

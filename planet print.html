@@ -6,6 +6,9 @@
   <title>Planet Print | Boshqaruv paneli</title>
   <link rel="icon" type="image/jpeg" href="assets/photo_2025-01-30_14-49-44.jpg" />
   <link rel="apple-touch-icon" href="assets/photo_2025-01-30_14-49-44.jpg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -122,51 +125,50 @@
       </section>
 
       <section id="dashboard" class="page active">
-        <div class="panel" style="padding-left:0;padding-right:0;padding-top:0;">
-          <h2 class="section-title">Moliyaviy boshqaruv</h2>
-          <p class="section-help">Planet Print uchun loyihalar, xarajatlar va huquqlar nazorati.</p>
-        </div>
         <div class="report-toolbar card">
           <div><label for="dashboardYear">Hisobot yili</label><select id="dashboardYear"></select></div>
           <div><label for="dashboardMonth">Oy</label><select id="dashboardMonth"></select></div>
+          <p class="section-help" style="margin:0 0 4px;flex:1 1 260px;">Daromad va xarajat — kassaga haqiqatda tushgan va chiqqan pul bo'yicha, tanlangan davr uchun.</p>
         </div>
         <div class="kpi-grid" id="kpiGrid"></div>
         <div id="projectAlerts" class="alert-stack"></div>
         <div class="dashboard-overview">
           <div class="card panel dashboard-trend">
-            <h3 class="section-title" style="font-size:18px;">Moliyaviy ko'rsatkichlar</h3>
-            <p class="section-help" id="dashboardChartCaption">Tanlangan davr bo'yicha daromad va xarajatlar</p>
-            <canvas id="financeTrendChart" width="720" height="260"></canvas>
+            <h3 class="chart-title">Daromad va xarajat, oylar bo'yicha</h3>
+            <p class="chart-sub" id="dashboardChartCaption">Tanlangan davr bo'yicha daromad va xarajatlar</p>
+            <canvas id="financeTrendChart" data-height="280"></canvas>
             <div id="financeTrendLegend" class="legend"></div>
           </div>
           <div class="card panel dashboard-status">
-            <h3 class="section-title" style="font-size:18px;">Loyihalar holati</h3>
+            <h3 class="chart-title">Loyihalar holati</h3>
             <div id="projectStatusSummary"></div>
           </div>
         </div>
         <div id="calcCenter" class="panel card super-only">
-          <h2 class="section-title">Hisob-kitob Markazi</h2>
-          <p class="section-help">Xarajatlar bo'limi va avanslar hisobga olinadi. Ishchi avansi oylikdan, ta'sischi avansi ulushdan ayriladi.</p>
+          <h2 class="section-title">Hisob-kitob markazi</h2>
+          <p class="section-help">Joriy oy bo'yicha ta'sischilar fondi qanday hisoblanishi bosqichma-bosqich. Zakazlar summasi asosida hisoblanadi (kassaga hali tushmagan qarz ham kiradi), shuning uchun yuqoridagi kassa ko'rsatkichlaridan farq qiladi.</p>
           <div class="split">
-            <div class="card panel">
-              <h3 class="section-title" style="font-size:16px;">Formulalar</h3>
-              <ul id="formulaList" class="tight"></ul>
+            <div class="chart-box">
+              <h3 class="chart-title">Ta'sischilar fondi hisobi</h3>
+              <ul id="formulaList" class="calc-steps"></ul>
             </div>
-            <div class="card panel">
-              <h3 class="section-title" style="font-size:16px;">Nazorat</h3>
-              <ul id="checkList" class="tight"></ul>
+            <div class="chart-box">
+              <h3 class="chart-title">Nazorat</h3>
+              <ul id="checkList" class="check-list"></ul>
             </div>
           </div>
           <p class="super-only-note">Diagrammalar va to'liq tahlillar faqat super admin uchun ko'rsatiladi.</p>
           <div class="charts dashboard-charts super-only">
             <div class="chart-box">
-              <h4 class="chart-title">To'lov Turlari</h4>
-              <canvas id="paymentChart" width="360" height="215"></canvas>
+              <h4 class="chart-title">Tushgan pul, to'lov turi bo'yicha</h4>
+              <p class="chart-sub">Joriy oyda mijozlardan haqiqatda olingan to'lovlar</p>
+              <canvas id="paymentChart" data-height="240"></canvas>
               <div id="paymentLegend" class="legend"></div>
             </div>
             <div class="chart-box">
-              <h4 class="chart-title">Xarajat Turlari</h4>
-              <canvas id="expenseChart" width="360" height="215"></canvas>
+              <h4 class="chart-title">Xarajatlar, turi bo'yicha</h4>
+              <p class="chart-sub">Joriy oy xarajatlari, kattadan kichikka (ta'sischi avansi kirmaydi)</p>
+              <canvas id="expenseChart" data-height="240"></canvas>
               <div id="expenseLegend" class="legend"></div>
             </div>
           </div>
@@ -223,7 +225,7 @@
           </form>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Ism</th><th>Lavozim</th><th>Oylik</th><th>Avans olingan</th><th>Oylik to'langan</th><th>Qolgan oylik</th><th>Amal</th></tr></thead>
+              <thead><tr><th>Ism</th><th>Lavozim</th><th class="num">Oylik</th><th class="num">Avans olingan</th><th class="num">Oylik to'langan</th><th class="num">Qolgan oylik</th><th>Amal</th></tr></thead>
               <tbody id="workersBody"></tbody>
             </table>
           </div>
@@ -278,7 +280,7 @@
       <section id="founders" class="page">
         <div class="panel card">
           <h2 class="section-title">Ta'sischilar Ulushi</h2>
-          <p class="section-help">Ta'sischi avansi avtomatik ravishda aynan o'sha ta'sischining ulushidan ayriladi.</p>
+          <p class="section-help">Ta'sischi avansi aynan o'sha ta'sischining ulushidan ayriladi. Avans ulushdan ko'p bo'lsa yoki oy zarar bilan yopilsa, yakuniy hisob manfiy (qizil) ko'rsatiladi: bu ta'sischining kompaniyaga qarzi. Ostida sababi yoziladi — zarar ulushi yoki ortiqcha olingan avans.</p>
           <form id="founderForm">
             <div class="grid-3">
               <div><label for="fName">Ta'sischi ismi</label><input id="fName" required /></div>
@@ -294,17 +296,18 @@
           </form>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Ism</th><th>Foiz</th><th>Izoh</th><th>Ulush (bazaviy)</th><th>Avans olingan</th><th>Yakuniy ulush</th><th>Amal</th></tr></thead>
+              <thead><tr><th>Ism</th><th class="num">Foiz</th><th>Izoh</th><th class="num">Foydadagi ulushi</th><th class="num">Avans olingan</th><th class="num">Yakuniy hisob</th><th>Holat</th><th>Amal</th></tr></thead>
               <tbody id="foundersBody"></tbody>
             </table>
           </div>
           <div class="card panel founder-insight">
-            <h3 class="section-title" style="font-size:16px;">Ta'sischilar Bo'linadigan Summasi</h3>
-            <ul id="founderCalcList" class="tight"></ul>
+            <h3 class="chart-title">Ta'sischilar bo'linadigan summasi</h3>
+            <ul id="founderCalcList" class="calc-steps"></ul>
             <p class="super-only-note">Ta'sischilar diagrammasi faqat super admin uchun ko'rsatiladi.</p>
             <div class="chart-box super-only" style="margin-top:10px;">
-              <h4 class="chart-title">Ta'sischilar Yakuniy Ulushi Diagrammasi</h4>
-              <canvas id="founderChart" width="360" height="215"></canvas>
+              <h4 class="chart-title">Ta'sischilar yakuniy hisobi</h4>
+              <p class="chart-sub">O'ngga — olishi kerak bo'lgan summa, chapga (qizil) — kompaniyaga qarzi (zarar ulushi yoki ortiqcha avans)</p>
+              <canvas id="founderChart" data-height="200"></canvas>
               <div id="founderLegend" class="legend"></div>
             </div>
           </div>
@@ -354,7 +357,7 @@
               </div>
             </div>
             <div class="allocation-editor">
-              <div class="allocation-heading"><div><strong>Zakazlarga taqsimlash</strong><p class="section-help">Xarajat summasi tanlangan zakazlarga to'liq taqsimlanishi shart.</p></div><button id="addAllocationBtn" class="ghost small-btn" type="button">+ Zakaz qo'shish</button></div>
+              <div class="allocation-heading"><div><strong>Zakazlarga taqsimlash</strong><p class="section-help">Xarajat summasi tanlangan zakazlarga to'liq taqsimlanishi shart. Agar xarajat bir zakaz uchun bo'lsa-yu, puli boshqa zakaz pulidan olingan bo'lsa, "Pul qaysi zakazdan olindi" maydonida o'sha zakazni tanlang.</p></div><button id="addAllocationBtn" class="ghost small-btn" type="button">+ Zakaz qo'shish</button></div>
               <div id="expenseAllocations"></div>
               <div id="allocationTotal" class="allocation-total"></div>
             </div>
@@ -372,11 +375,12 @@
             </table>
           </div>
           <div class="card panel order-expense-panel">
-            <h3 class="section-title" style="font-size:18px;">Zakazlar bo'yicha xarajatlar va ta'sischi avanslari</h3>
-            <p class="section-help">Qoldiq zakazning umumiy summasidan unga biriktirilgan xarajatlar va ta'sischi avanslarini ayirish orqali hisoblanadi. Avans berilmagan bo'lsa, "Olinmagan" deb ko'rsatiladi. Zakazsiz umumiy xarajatlar alohida jamlanadi.</p>
+            <h3 class="chart-title" style="font-size:17px;">Zakazlar bo'yicha hisob</h3>
+            <p class="section-help"><b>Foyda</b> = zakaz summasi − shu zakaz uchun qilingan xarajatlar − ta'sischi avanslari. <b>Kassa</b> = shu oy zakazdan tushgan pul − shu zakaz pulidan to'langan barcha xarajatlar (boshqa zakaz uchun ishlatilgani ham). Bir zakaz puli boshqa zakazga ishlatilgan bo'lsa, quyida "zakazlar orasidagi qarz" sifatida ko'rinadi.</p>
+            <div id="orderBorrowings"></div>
             <div class="table-wrap">
               <table class="expense-table">
-                <thead><tr><th>Zakaz</th><th>Zakaz summasi</th><th>Xarajatlar</th><th>Ta'sischi olgan avans</th><th>Jami sarf</th><th>Zakaz summasidan qoldiq</th></tr></thead>
+                <thead><tr><th>Zakaz</th><th class="num">Zakaz summasi</th><th class="num">Xarajatlar</th><th>Ta'sischi avansi</th><th class="num">Foyda</th><th class="num">Shu oy tushgan</th><th class="num">Boshqa zakazdan olgan</th><th class="num">Boshqa zakazga bergan</th><th class="num">Kassa qoldig'i</th></tr></thead>
                 <tbody id="orderExpensesBody"></tbody>
               </table>
             </div>
@@ -416,14 +420,15 @@
             <button id="exportReportBtn" type="button">Excelga yuklash (.csv)</button>
           </div>
           <div class="kpi-grid report-kpis" id="reportKpis"></div>
-          <div class="card panel">
-            <h3 class="section-title" style="font-size:18px;">Oylik daromad va xarajatlar</h3>
-            <canvas id="reportTrendChart" width="720" height="280"></canvas>
+          <div class="chart-box">
+            <h3 class="chart-title">Oylik daromad va xarajatlar</h3>
+            <p class="chart-sub">Ustun ustiga olib boring — aniq summa va sof foyda ko'rinadi</p>
+            <canvas id="reportTrendChart" data-height="300"></canvas>
             <div id="reportTrendLegend" class="legend"></div>
           </div>
           <div class="table-wrap">
             <table class="expense-table">
-              <thead><tr><th>Oy</th><th>Daromad</th><th>Xarajat</th><th>Sof foyda</th><th>Ta'sischi avansi</th><th>To'lovlar soni</th><th>Xarajatlar soni</th></tr></thead>
+              <thead><tr><th>Oy</th><th class="num">Daromad</th><th class="num">Xarajat</th><th class="num">Sof foyda</th><th class="num">Ta'sischi avansi</th><th class="num">To'lovlar soni</th><th class="num">Xarajatlar soni</th></tr></thead>
               <tbody id="reportMonthsBody"></tbody>
             </table>
           </div>

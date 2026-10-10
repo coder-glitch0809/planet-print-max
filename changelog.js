@@ -2,6 +2,24 @@
 // Yangi o'zgarish kiritilganda ro'yxat BOSHIGA yangi yozuv qo'shing (eng yangisi birinchi).
 module.exports = [
   {
+    version: "2026.10.10",
+    date: "2026-10-10",
+    title: "Yangi dizayn va aniqroq hisob-kitob",
+    items: [
+      "Butun dastur yangi, zamonaviy dizaynga o'tkazildi: kunduzgi va tungi rejim, kompyuterda doimiy yon menyu, telefonda qulay ko'rinish.",
+      "Kunduzgi rejimda kiritish maydonlari ko'rinmay qolishi tuzatildi.",
+      "Diagrammalar qayta chizildi: aniq o'qiladigan ranglar, ustun ustiga olib borsangiz aniq summa chiqadi.",
+      "Xarajatda \"Pul qaysi zakazdan olindi\" maydoni: bir zakaz puli boshqa zakazga ishlatilsa, xarajat to'g'ri zakazga yoziladi va zakazlar orasidagi qarz alohida ko'rsatiladi.",
+      "Izohida boshqa zakaz nomi bor xarajatlar \"tekshiring\" belgisi bilan ajratiladi.",
+      "Zakazlar jadvalida foyda (summa − xarajat − avans) va kassa qoldig'i (tushgan − sarflangan) alohida ko'rsatiladi.",
+      "Ta'sischi ulushidan ortiq avans olsa yoki oy zarar bilan yopilsa, hisob endi 0 emas, manfiy (qizil) ko'rsatiladi: qancha qaytarishi kerakligi aniq yoziladi.",
+      "Ishchilarga hali to'lanmagan oylik ta'sischilar fondidan ayriladi: ishchilarga tegishli pul ta'sischilarga bo'linib ketmaydi.",
+      "Qolgan oylik har bir ishchi uchun alohida hisoblanadi: birining ortiqcha olgani boshqasining qarzini yashirmaydi.",
+      "Ta'sischilar foizi 100% dan kam bo'lsa, qolgan qism \"kompaniyada qoladi\" deb ko'rsatiladi.",
+      "Xarajatlar diagrammasiga \"Boshqa\" va \"Ishchi oyligi\" turlari qo'shildi (avval tushib qolardi)."
+    ]
+  },
+  {
     version: "2026.10.09",
     date: "2026-10-09",
     title: "Hisob-kitob aniqligi va ma'lumot xavfsizligi",

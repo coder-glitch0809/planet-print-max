@@ -604,11 +604,14 @@ function validateNewExpenseAllocations(currentFinance, nextFinance) {
     const total = allocations.reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0);
     const previous = existingById.get(String(expense.id));
     const previousProjectIds = new Set((previous?.allocations || [])
-      .map((allocation) => String(allocation.projectId || "")));
+      .flatMap((allocation) => [String(allocation.projectId || ""), String(allocation.fundedByProjectId || "")]));
     if (previous?.sourceProjectId) previousProjectIds.add(String(previous.sourceProjectId));
+    const knownProject = (id) => validProjectIds.has(String(id)) || previousProjectIds.has(String(id));
     const valid = allocations.length > 0 &&
       allocations.every((allocation) => allocation.projectId && Number(allocation.amount) > 0 &&
-        (validProjectIds.has(String(allocation.projectId)) || previousProjectIds.has(String(allocation.projectId)))) &&
+        knownProject(allocation.projectId) &&
+        // Ixtiyoriy: xarajat puli boshqa zakazdan olingan bo'lsa, u ham mavjud zakaz bo'lishi kerak.
+        (!allocation.fundedByProjectId || knownProject(allocation.fundedByProjectId))) &&
       new Set(allocations.map((allocation) => allocation.projectId)).size === allocations.length &&
       Math.abs(total - Number(expense.amount || 0)) < 0.01;
     if (valid) continue;
