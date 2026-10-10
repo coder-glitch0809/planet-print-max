@@ -210,6 +210,7 @@
       <section id="workers" class="page">
         <div class="panel card">
           <h2 class="section-title">Ishchilar va Oyliklar</h2>
+          <p class="section-help">Ishchiga avans yoki oylik berish uchun jadvaldagi <b>Avans berish</b> tugmasini bosing — Xarajatlar bo'limida forma tayyor ochiladi. Telefon kiritilgan va botga ulangan ishchiga avans haqida shaxsiy Telegram xabar boradi, buxgalterga ham xabar keladi.</p>
           <form id="workerForm">
             <div class="grid-3">
               <div><label for="wName">Ishchi ismi</label><input id="wName" required /></div>
@@ -285,6 +286,7 @@
             <div class="grid-3">
               <div><label for="fName">Ta'sischi ismi</label><input id="fName" required /></div>
               <div><label for="fShare">Foizi (%)</label><input id="fShare" inputmode="decimal" required /></div>
+              <div><label for="fPhone">Telefon (Telegram xabari uchun)</label><input id="fPhone" type="tel" placeholder="+998901234567" /></div>
               <div><label for="fNote">Izoh</label><input id="fNote" /></div>
             </div>
             <div class="actions">
@@ -317,7 +319,19 @@
       <section id="expenses" class="page">
         <div class="panel card">
           <h2 class="section-title">Xarajatlar</h2>
-          <p class="section-help">Har bir xarajat, ishchi oyligi va avans bir yoki bir nechta zakazga to'liq taqsimlanishi shart.</p>
+          <p class="section-help">Material va boshqa xarajatlar bir yoki bir nechta zakazga to'liq taqsimlanadi.</p>
+          <div class="advance-guide">
+            <strong>Avans qanday kiritiladi?</strong>
+            <ol>
+              <li><b>Xarajat turi</b>: ishchiga — «Oylik maosh avansi» (oylik kunida — «Ishchi oyligi»), ta'sischiga — «Ta'sischi avansi».</li>
+              <li>Ishchini yoki ta'sischini tanlang, summa va to'lov turini kiriting.</li>
+              <li>Zakaz tanlash <b>ixtiyoriy</b>: avans ma'lum zakaz pulidan berilgan bo'lsa, o'sha zakazni tanlang, aks holda bo'sh qoldiring.</li>
+            </ol>
+            <div class="actions" style="margin-top:6px;">
+              <button class="ghost small-btn" type="button" data-quick-expense="oylik_avans">+ Ishchiga avans</button>
+              <button class="ghost small-btn" type="button" data-quick-expense="founder_avans">+ Ta'sischiga avans</button>
+            </div>
+          </div>
           <form id="expenseForm">
             <div class="grid-4">
               <div><label for="eDate">Sana</label><input id="eDate" type="date" required /></div>
@@ -357,7 +371,7 @@
               </div>
             </div>
             <div class="allocation-editor">
-              <div class="allocation-heading"><div><strong>Zakazlarga taqsimlash</strong><p class="section-help">Xarajat summasi tanlangan zakazlarga to'liq taqsimlanishi shart. Agar xarajat bir zakaz uchun bo'lsa-yu, puli boshqa zakaz pulidan olingan bo'lsa, "Pul qaysi zakazdan olindi" maydonida o'sha zakazni tanlang.</p></div><button id="addAllocationBtn" class="ghost small-btn" type="button">+ Zakaz qo'shish</button></div>
+              <div class="allocation-heading"><div><strong id="allocationTitle">Zakazlarga taqsimlash</strong><p id="allocationHelp" class="section-help">Xarajat summasi tanlangan zakazlarga to'liq taqsimlanishi shart. Agar xarajat bir zakaz uchun bo'lsa-yu, puli boshqa zakaz pulidan olingan bo'lsa, "Pul qaysi zakazdan olindi" maydonida o'sha zakazni tanlang.</p></div><button id="addAllocationBtn" class="ghost small-btn" type="button">+ Zakaz qo'shish</button></div>
               <div id="expenseAllocations"></div>
               <div id="allocationTotal" class="allocation-total"></div>
             </div>
@@ -493,11 +507,25 @@
           <div id="settingsMsg" class="msg"></div>
         </div>
         <div class="panel card super-only">
-          <h2 class="section-title">Telegram orqali ishchilarga xabar</h2>
-          <p class="section-help">Admin va rollar boshqaruvida telefon, lavozim va bo‘lim ruxsatlarini belgilang. Xodim botda /start bosib, o‘z telefonini bir marta yuboradi.</p>
-          <div class="actions"><button id="telegramSetup" type="button">Botni ulash (webhook)</button><button id="telegramRefresh" type="button" class="ghost">Bog‘lanishlarni tekshirish</button></div>
+          <h2 class="section-title">Telegram bot</h2>
+          <p class="section-help">1) «Bot holatini tekshirish» — bot nima uchun javob bermayotganini ko'rsatadi. 2) «Botni ulash» — botni shu saytga ulaydi (bir marta). 3) Xodim botda /start bosib, o‘z telefonini yuboradi. Telefon Foydalanuvchilar, Ishchilar yoki Ta'sischilar kartasidagi bilan bir xil bo'lishi kerak.</p>
+          <div class="actions">
+            <button id="telegramStatusBtn" type="button" class="ghost">Bot holatini tekshirish</button>
+            <button id="telegramSetup" type="button">Botni ulash (webhook)</button>
+            <button id="telegramRefresh" type="button" class="ghost">Bog‘lanishlarni tekshirish</button>
+            <button id="telegramGuideBtn" type="button" class="ghost">Qo'llanmani hammaga yuborish</button>
+          </div>
+          <div id="telegramStatusBox" class="telegram-status hidden"></div>
           <div id="telegramStaffStatus" class="msg" aria-live="polite"></div>
-          <div id="telegramStaffList"></div>
+          <div id="telegramStaffList" class="telegram-staff-list"></div>
+          <h3 class="section-title" style="font-size:17px;margin-top:18px;">Guruh va rasm saqlash</h3>
+          <p class="section-help">Guruhga tasdiqlangan dizaynlar va yangi o'lchovlar (rasm bilan) keladi. Ulash: botni guruhga qo'shing va guruhda <b>/guruh</b> yozing (botga ulangan superadmin) — yoki guruhda <b>/chatid</b> yozib, chiqqan raqamni shu yerga kiriting. «Media chat» bo'sh bo'lsa, rasmlar yuklovchining o'z bot chatida saqlanadi.</p>
+          <div class="grid-3">
+            <div><label for="tgGroupChatId">Guruh Chat ID</label><input id="tgGroupChatId" inputmode="numeric" placeholder="-1001234567890" /></div>
+            <div><label for="tgMediaChatId">Media chat ID (ixtiyoriy)</label><input id="tgMediaChatId" inputmode="numeric" placeholder="Bo'sh — avtomatik" /></div>
+          </div>
+          <div class="actions"><button id="telegramConfigSave" type="button">Saqlash</button><button id="telegramGroupTest" type="button" class="ghost">Guruhga test xabar</button></div>
+          <div id="telegramConfigMsg" class="msg" aria-live="polite"></div>
           <p class="section-help">E’lon botga bog‘langan, Sozlamalar ruxsati bor foydalanuvchilarga yuboriladi. Montajnikka faqat tasdiqlangan montaj vazifasi boradi.</p>
           <form id="announcementForm" class="form-grid">
             <div><label for="announcementText">Xabar matni</label><textarea id="announcementText" rows="4" maxlength="3500" required placeholder="Platformadagi yangilik yoki ishchilar uchun e'lon"></textarea></div>

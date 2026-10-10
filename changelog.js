@@ -2,6 +2,22 @@
 // Yangi o'zgarish kiritilganda ro'yxat BOSHIGA yangi yozuv qo'shing (eng yangisi birinchi).
 module.exports = [
   {
+    version: "2026.10.11",
+    date: "2026-10-11",
+    title: "Avanslar, loyihani yakunlash va Telegram xabarlari",
+    items: [
+      "Dizayn va o'lchov rasmi endi TELEGRAM_MEDIA_CHAT_ID'siz ham yuklanadi: rasm yuklovchining bot chatida yoki Sozlamalardagi media chatda saqlanadi.",
+      "Sozlamalar → Telegram bot: «Bot holatini tekshirish» bot nima uchun javob bermayotganini ko'rsatadi; «Botni ulash» endi APP_PUBLIC_URL va maxfiy kalitni o'zi aniqlaydi.",
+      "Botda «🆔 Chat ID olish», /chatid va «📖 Qo'llanma» tugmalari; guruhda /chatid va /guruh ishlaydi.",
+      "Ishchi va ta'sischiga avans: jadvaldagi «Avans berish» tugmasi, zakaz tanlash ixtiyoriy. Ta'sischiga telefon kiritiladi.",
+      "Avans berilganda ishchining (ta'sischining) o'ziga shaxsiy va buxgalterga Telegram xabar boradi: summa, shu oy jami avans, qolgan oylik.",
+      "Yangi loyiha haqida buxgalterga: qancha baholandi, qancha avans olindi, qoldiq.",
+      "Loyihalarda «✓ Yakunlandi» tugmasi: muddatidan oldin yoki kechikib tugasa ham yakunlanadi, necha kun farqi ko'rsatiladi va xabar yuboriladi.",
+      "Tasdiqlangan dizayn montajnikka va ishchilar guruhiga; yangi o'lchov dizaynerga alohida va guruhga rasm bilan yuboriladi.",
+      "Botdan foydalanish bo'yicha rasmli qo'llanma (5 sahifa) — botda /qollanma yoki Sozlamalardan hammaga yuborish."
+    ]
+  },
+  {
     version: "2026.10.10",
     date: "2026-10-10",
     title: "Yangi dizayn va aniqroq hisob-kitob",

@@ -441,6 +441,7 @@ function validateFinanceChanges(current, next) {
   const phones = next.workers.map(w => normalizePhone(w.phone)).filter(Boolean);
   if (new Set(phones).size !== phones.length) return "Xodim telefon raqami takrorlangan.";
   if (next.workers.some(w => w.phone && !/^\d{9,15}$/.test(normalizePhone(w.phone)))) return "Telefon raqami noto'g'ri.";
+  if (next.founders.some(f => f.phone && !/^\d{9,15}$/.test(normalizePhone(f.phone)))) return "Ta'sischi telefon raqami noto'g'ri.";
   const paymentTotal = (rows, projectId) => rows.filter(p => p.projectId === projectId).reduce((sum, p) => sum + Number(p.amount), 0);
   for (const project of next.projects) {
     if (!isMoney(project.amount) || !isMoney(project.advance) || Number(project.advance) > Number(project.amount) + 0.001) return "Zakaz to'lov summasi noto'g'ri.";
@@ -509,7 +510,7 @@ function activityTitle(category, row) {
   return "";
 }
 
-const PROJECT_FIELD_LABELS = { name: "nomi", client: "mijoz", amount: "summa", advance: "to'langan", status: "holat", dueDate: "topshirish", startDate: "olingan sana" };
+const PROJECT_FIELD_LABELS = { name: "nomi", client: "mijoz", amount: "summa", advance: "to'langan", status: "holat", dueDate: "topshirish", startDate: "olingan sana", completedAt: "yakunlangan sana" };
 function projectChangeDetail(before, after) {
   return Object.entries(PROJECT_FIELD_LABELS)
     .filter(([field]) => String(before[field] ?? "") !== String(after[field] ?? ""))
@@ -594,6 +595,9 @@ async function logActivity(req, entries, { asSystem = false } = {}) {
   }
 }
 
+// Ishchi avansi/oyligi va ta'sischi avansi zakazga bog'lanmasdan ham kiritiladi (zakaz ixtiyoriy).
+const PERSON_EXPENSE_TYPES = ["oylik_avans", "oylik_tolov", "founder_avans"];
+
 function validateNewExpenseAllocations(currentFinance, nextFinance) {
   const current = normalizeFinance(currentFinance);
   const next = normalizeFinance(nextFinance);
@@ -601,6 +605,15 @@ function validateNewExpenseAllocations(currentFinance, nextFinance) {
   const validProjectIds = new Set(next.projects.map((project) => String(project.id)));
   for (const expense of next.expenses) {
     const allocations = Array.isArray(expense.allocations) ? expense.allocations : [];
+    if (PERSON_EXPENSE_TYPES.includes(expense.type) && !allocations.length) {
+      const previous = existingById.get(String(expense.id));
+      if (previous && JSON.stringify(previous) === JSON.stringify(expense)) continue;
+      const owner = expense.type === "founder_avans"
+        ? next.founders.some(f => f.id === expense.founderId)
+        : next.workers.some(w => w.id === expense.workerId);
+      if (owner && isMoney(expense.amount, false)) continue;
+      return expense.type === "founder_avans" ? "Avans uchun ta'sischini tanlang." : "Avans yoki oylik uchun ishchini tanlang.";
+    }
     const total = allocations.reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0);
     const previous = existingById.get(String(expense.id));
     const previousProjectIds = new Set((previous?.allocations || [])
@@ -727,12 +740,6 @@ async function telegramApi(method, body, isForm = false) {
   return result.result;
 }
 
-function mediaChatId() {
-  const chatId = String(process.env.TELEGRAM_MEDIA_CHAT_ID || "").trim();
-  if (!chatId) throw new Error("TELEGRAM_MEDIA_CHAT_ID sozlanmagan; rasmlar uchun bot kiradigan yopiq media chat kerak.");
-  return chatId;
-}
-
 function usesMemoryStore(req) {
   const id = req?.user?.id;
   return !firestore || id === "fallback-super-admin" || (!!id && memoryStore.users.some((item) => item.id === id));
@@ -833,9 +840,9 @@ app.post("/api/telegram/upload-photo", authRequired, async (req, res) => {
     const image = Buffer.from(match[2], "base64");
     if (!image.length || image.length > 3 * 1024 * 1024) return res.status(413).json({ error: "Siqilgan rasm 3 MB dan kichik bo'lishi kerak." });
     const form = new FormData();
-    form.set("chat_id", mediaChatId());
+    form.set("chat_id", await telegramStaff.storageChat(req.user.id));
     form.set("photo", new Blob([image], { type: `image/${match[1]}` }), `planet-print-${crypto.randomUUID()}.${match[1]}`);
-    form.set("caption", kind === "measurement" ? "Planet Print | O'lchov rasmi" : "Planet Print | Dizayn");
+    form.set("caption", kind === "measurement" ? "📎 Planet Print | O'lchov rasmi (saqlash uchun nusxa)" : "📎 Planet Print | Dizayn rasmi (saqlash uchun nusxa)");
     const sent = await telegramApi("sendPhoto", form, true);
     const photo = sent.photo?.at(-1);
     if (!photo?.file_id) throw new Error("Telegram rasm file_id qaytarmadi.");
@@ -860,9 +867,18 @@ app.post("/api/telegram/send-design", authRequired, async (req, res) => {
     if (!fileId || !dimensions || !instruction) return res.status(400).json({ error: "Dizayn rasmi, o'lchamlari va montaj vazifasini to'ldiring." });
     const project = finance.projects.find(item => item.id === design.projectId);
     if (!project) return res.status(400).json({ error: "Dizayn zakazi topilmadi." });
-    const caption = `TASDIQLANGAN DIZAYN — MONTAJ VAZIFASI\nZakaz: ${sanitizeText(project.name)}\nO'lcham: ${dimensions}\nBajariladigan ish: ${instruction}`;
-    const delivery = await telegramStaff.deliver("approved_designs", caption, undefined, fileId);
-    if (!delivery.sent) throw new Error("Dizayn yuborilmadi. Foydalanuvchi telefoni, Telegram bog'lanishi va Dizaynlar ruxsatini tekshiring.");
+    const e = telegramStaff.escape;
+    const caption = [
+      "🎨 <b>TASDIQLANGAN DIZAYN — MONTAJ VAZIFASI</b>",
+      `📌 Zakaz: <b>${e(project.name)}</b>${project.client ? ` — ${e(project.client)}` : ""}`,
+      `📏 O'lcham: <b>${e(dimensions)}</b>`,
+      `🛠 Bajariladigan ish: ${e(instruction)}`,
+      project.dueDate ? `📅 Topshirish: ${e(project.dueDate)}` : "",
+      `✍️ Yubordi: ${e(req.user.username)}`
+    ].filter(Boolean).join("\n");
+    // Montajnikka (lavozimi bo'yicha) va umumiy guruhga yuboriladi.
+    const delivery = await telegramStaff.deliver("approved_designs", caption, finance, fileId, { toGroup: true });
+    if (!delivery.sent) throw new Error("Dizayn yuborilmadi: botga ulangan montajnik yoki guruh yo'q. Montajnik telefoni, Telegram bog'lanishi, Dizaynlar ruxsati yoki Sozlamalar → Telegram guruhini tekshiring.");
     res.json({ ok: true, messageId: null, delivery });
   } catch (err) {
     console.error("Approved design Telegram delivery failed:", err.message);
@@ -892,7 +908,7 @@ app.post("/api/telegram/announcement", authRequired, superAdminRequired, async (
   const text = sanitizeText(req.body?.text, 3500);
   if (!text) return res.status(400).json({ error: "E'lon matnini kiriting." });
   try {
-    const result = await telegramStaff.deliver("announcements", text);
+    const result = await telegramStaff.deliver("announcements", `📢 <b>E'lon</b>\n\n${telegramStaff.escape(text)}\n\n✍️ ${telegramStaff.escape(req.user.username)}`);
     res.json({ ok: true, sent: result });
   } catch (err) {
     console.error("Telegram announcement failed:", err.message);
@@ -1108,7 +1124,7 @@ app.put("/api/finance", authRequired, async (req, res) => {
       return { next: mergedFinance };
     });
     await logActivity(req, financeActivity(state.previous, state.next));
-    const warnings = await telegramStaff.notifyChanges(normalizeFinance(state.previous), normalizeFinance(state.next));
+    const warnings = await telegramStaff.notifyChanges(normalizeFinance(state.previous), normalizeFinance(state.next), req.user.username);
     res.json({ ok: true, revision: state.revision, warnings, ...(state.storage ? { storage: state.storage } : {}) });
   } catch (err) { sendServerError(res, err, "Finance save failed"); }
 });

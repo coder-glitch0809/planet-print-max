@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8" />
+<!-- Telegram qo'llanma rasmlari manbasi. Qayta yaratish: node scripts/guide/render.js -->
+<style>
+  :root { --brand: #0b7285; --brand-dark: #064b57; --brand-soft: #e3f4f6; --accent: #f5c518; --ink: #0f172a; --ink-2: #334155; --muted: #64748b; --ok: #15803d; --ok-soft: #e7f6ec; --warn-soft: #fdf4dc; --line: #dbe3ec; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1350px; overflow: hidden; background: #fff; }
+  body { font-family: "Segoe UI", "Segoe UI Emoji", system-ui, sans-serif; color: var(--ink); }
+  .slide { display: none; width: 1080px; height: 1350px; position: relative; background: linear-gradient(180deg, #f6fafc 0%, #ffffff 40%); }
+  .slide.on { display: flex; flex-direction: column; }
+  .top { display: flex; align-items: center; gap: 22px; padding: 46px 64px 0; }
+  .top img { width: 78px; height: 78px; border-radius: 20px; object-fit: cover; box-shadow: 0 6px 18px rgba(11,114,133,.25); }
+  .top .brand { font-size: 30px; font-weight: 800; letter-spacing: -.3px; }
+  .top .brand small { display: block; font-size: 20px; font-weight: 600; color: var(--muted); }
+  .top .num { margin-left: auto; font-size: 24px; font-weight: 700; color: var(--brand); background: var(--brand-soft); padding: 10px 20px; border-radius: 999px; }
+  h1 { font-size: 66px; line-height: 1.08; font-weight: 800; letter-spacing: -1.2px; padding: 44px 64px 0; }
+  h1 em { font-style: normal; color: var(--brand); }
+  .lead { font-size: 29px; line-height: 1.4; color: var(--ink-2); padding: 20px 64px 0; }
+  .body { flex: 1; padding: 40px 64px 0; display: flex; flex-direction: column; gap: 22px; }
+  .step { display: flex; gap: 26px; align-items: flex-start; background: #fff; border: 2px solid var(--line); border-radius: 26px; padding: 26px 30px; }
+  .step .n { flex: 0 0 64px; height: 64px; border-radius: 50%; background: var(--brand); color: #fff; font-size: 32px; font-weight: 800; display: grid; place-items: center; }
+  .step h3 { font-size: 32px; font-weight: 750; margin-bottom: 6px; }
+  .step p { font-size: 25px; line-height: 1.38; color: var(--ink-2); }
+  .btn { display: inline-block; margin-top: 10px; padding: 12px 22px; border-radius: 14px; background: var(--brand-soft); color: var(--brand-dark); font-size: 25px; font-weight: 700; border: 2px solid #b9e3e9; }
+  .code { font-family: Consolas, monospace; background: #0f172a; color: #7fdbe6; padding: 4px 12px; border-radius: 8px; font-size: 25px; }
+  .foot { padding: 26px 64px 44px; font-size: 23px; color: var(--muted); }
+  .foot b { color: var(--brand); }
+  .note { background: var(--warn-soft); border-radius: 22px; padding: 22px 28px; font-size: 25px; line-height: 1.4; color: #6b4a00; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .role { background: #fff; border: 2px solid var(--line); border-radius: 24px; padding: 24px 26px; }
+  .role .ic { font-size: 44px; }
+  .role h3 { font-size: 30px; font-weight: 800; margin: 6px 0 8px; }
+  .role p { font-size: 23px; line-height: 1.38; color: var(--ink-2); }
+  .role.wide { grid-column: 1 / -1; display: flex; gap: 22px; align-items: center; background: var(--brand); border-color: var(--brand); color: #fff; }
+  .role.wide p { color: #e3f4f6; }
+  .chat { background: #dfeee4; border-radius: 28px; padding: 26px; display: flex; flex-direction: column; gap: 14px; }
+  .bubble { background: #fff; border-radius: 20px 20px 20px 6px; padding: 18px 22px; font-size: 24px; line-height: 1.45; max-width: 88%; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .bubble.me { align-self: flex-end; background: #effdde; border-radius: 20px 20px 6px 20px; }
+  .bubble b { font-weight: 750; }
+  .kb { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .kb span { background: rgba(255,255,255,.8); border-radius: 14px; padding: 14px; text-align: center; font-size: 23px; font-weight: 650; }
+  .kb span.full { grid-column: 1 / -1; }
+  /* Muqova */
+  .cover { background: linear-gradient(160deg, var(--brand-dark) 0%, var(--brand) 55%, #12a3b8 100%); color: #fff; }
+  .cover .top .brand small { color: #bfe9ef; }
+  .cover .top .num { background: rgba(255,255,255,.16); color: #fff; }
+  .cover h1 { font-size: 92px; padding-top: 120px; }
+  .cover h1 em { color: var(--accent); }
+  .cover .lead { color: #d8f2f5; font-size: 34px; }
+  .toc { padding: 70px 64px 0; display: flex; flex-direction: column; gap: 18px; }
+  .toc div { display: flex; align-items: center; gap: 22px; font-size: 32px; font-weight: 650; background: rgba(255,255,255,.12); border-radius: 22px; padding: 20px 26px; }
+  .toc i { font-style: normal; width: 54px; height: 54px; border-radius: 50%; background: var(--accent); color: var(--brand-dark); display: grid; place-items: center; font-weight: 800; }
+  .cover .foot { margin-top: auto; color: #bfe9ef; }
+  .cover .foot b { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<section class="slide cover" data-n="1">
+  <div class="top"><img src="../../assets/photo_2025-01-30_14-49-44.jpg" alt=""><div class="brand">Planet Print<small>Boshqaruv tizimi</small></div><div class="num">Qo'llanma</div></div>
+  <h1>Telegram <em>bot</em><br>qo'llanmasi</h1>
+  <p class="lead">Botga ulanish, Chat ID olish va har bir lavozimga qanday xabar kelishi — 5 ta qisqa sahifada.</p>
+  <div class="toc">
+    <div><i>1</i>Botga ulanish va Chat ID olish</div>
+    <div><i>2</i>Kimga qanday xabar keladi</div>
+    <div><i>3</i>Avans berish va xabarlar</div>
+    <div><i>4</i>Loyiha, dizayn va o'lchovlar</div>
+    <div><i>5</i>Guruhni ulash (superadmin)</div>
+  </div>
+  <div class="foot">Savol bo'lsa — <b>superadminga</b> murojaat qiling</div>
+</section>
+
+<section class="slide" data-n="2">
+  <div class="top"><img src="../../assets/photo_2025-01-30_14-49-44.jpg" alt=""><div class="brand">Planet Print<small>Telegram bot</small></div><div class="num">1 / 5</div></div>
+  <h1>Botga ulanish va <em>Chat ID</em> olish</h1>
+  <div class="body">
+    <div class="step"><div class="n">1</div><div><h3>Botni oching va /start bosing</h3><p>Superadmin bergan bot havolasini oching, pastdagi <b>START</b> tugmasini bosing.</p></div></div>
+    <div class="step"><div class="n">2</div><div><h3>Telefon raqamingizni yuboring</h3><p>Pastdagi tugmani bosing va «Ulashish»ni tasdiqlang:</p><span class="btn">📱 Telefon raqamni yuborish</span></div></div>
+    <div class="step"><div class="n">3</div><div><h3>«✅ Bog'landingiz» xabari keladi</h3><p>Unda ismingiz, lavozimingiz va Chat ID'ingiz yoziladi.</p></div></div>
+    <div class="step"><div class="n">4</div><div><h3>Chat ID kerak bo'lsa</h3><p>Istalgan vaqtda tugmani bosing yoki <span class="code">/chatid</span> yozing:</p><span class="btn">🆔 Chat ID olish</span></div></div>
+    <div class="note">⚠ Telefon raqamingiz dasturda (Foydalanuvchilar, Ishchilar yoki Ta'sischilar kartasida) yozilgan bo'lishi shart. Aks holda bot «raqam topilmadi» deydi.</div>
+  </div>
+  <div class="foot">Ulanish <b>bir marta</b> qilinadi</div>
+</section>
+
+<section class="slide" data-n="3">
+  <div class="top"><img src="../../assets/photo_2025-01-30_14-49-44.jpg" alt=""><div class="brand">Planet Print<small>Telegram bot</small></div><div class="num">2 / 5</div></div>
+  <h1>Kimga qanday <em>xabar</em> keladi</h1>
+  <p class="lead">Xabarlar har kimning o'z chatiga — lavozimiga qarab yuboriladi.</p>
+  <div class="body">
+    <div class="grid">
+      <div class="role"><div class="ic">👑</div><h3>Superadmin</h3><p>Hamma xabarlar: loyihalar, to'lovlar, xarajatlar, avanslar, o'lchovlar, dizaynlar.</p></div>
+      <div class="role"><div class="ic">📊</div><h3>Buxgalter</h3><p>Yangi loyiha va bahosi, olingan avans, to'lovlar, xarajatlar, ishchi va ta'sischi avanslari.</p></div>
+      <div class="role"><div class="ic">🎨</div><h3>Dizayner</h3><p>Yangi o'lchovlar — rasm, manzil va o'lchamlar bilan, alohida.</p></div>
+      <div class="role"><div class="ic">🛠</div><h3>Montajnik</h3><p>Tasdiqlangan dizayn rasmi, o'lchami va bajariladigan ish.</p></div>
+      <div class="role"><div class="ic">👷</div><h3>Ishchi</h3><p>O'ziga berilgan avans va oylik haqida shaxsiy xabar.</p></div>
+      <div class="role"><div class="ic">🏦</div><h3>Ta'sischi</h3><p>O'zi olgan avans va shu oy jami avansi.</p></div>
+      <div class="role wide"><div class="ic">👥</div><div><h3>Ishchilar guruhi</h3><p>Tasdiqlangan dizaynlar va yangi o'lchovlar guruhga ham yuboriladi.</p></div></div>
+    </div>
+  </div>
+  <div class="foot">Bo'lim ruxsatlarini <b>superadmin</b> belgilaydi</div>
+</section>
+
+<section class="slide" data-n="4">
+  <div class="top"><img src="../../assets/photo_2025-01-30_14-49-44.jpg" alt=""><div class="brand">Planet Print<small>Dastur va bot</small></div><div class="num">3 / 5</div></div>
+  <h1>Avans berish va <em>xabarlar</em></h1>
+  <div class="body">
+    <div class="step"><div class="n">1</div><div><h3>Ishchilar yoki Ta'sischilar bo'limi</h3><p>Kerakli odam qatoridagi tugmani bosing:</p><span class="btn">Avans berish</span></div></div>
+    <div class="step"><div class="n">2</div><div><h3>Summani kiriting va saqlang</h3><p>Zakaz tanlash <b>ixtiyoriy</b>. Oylik kunida turini «Ishchi oyligi» qiling.</p></div></div>
+    <div class="chat">
+      <div class="bubble"><b>💵 Sizga oylik avansi berildi</b><br>👷 Ishchi: <b>Ali</b> (Montajnik)<br>💰 Summa: <b>500 000 UZS</b><br>📅 2026-10-11 · Naqd<br>🧾 Oylik: 3 000 000 · qolgan: <b>2 500 000 UZS</b></div>
+      <div class="bubble"><b>🏦 Ta'sischi avansi berildi</b><br>👤 Ta'sischi: <b>Aziz</b> (40%)<br>💰 Summa: <b>1 000 000 UZS</b><br>📊 Shu oy jami avansi: 1 500 000 UZS</div>
+    </div>
+    <div class="note">Xabar ishchining o'ziga (shaxsan) va buxgalterga boradi. Buning uchun ishchi kartasida telefon bo'lsin va ishchi botga ulangan bo'lsin.</div>
+  </div>
+  <div class="foot">Ta'sischilar ham oylikdan <b>oldin avans</b> olishi mumkin</div>
+</section>
+
+<section class="slide" data-n="5">
+  <div class="top"><img src="../../assets/photo_2025-01-30_14-49-44.jpg" alt=""><div class="brand">Planet Print<small>Dastur va bot</small></div><div class="num">4 / 5</div></div>
+  <h1>Loyiha, dizayn va <em>o'lchovlar</em></h1>
+  <div class="body">
+    <div class="step"><div class="n">🆕</div><div><h3>Yangi loyiha</h3><p>Buxgalterga keladi: nomi, mijoz, <b>qancha baholandi</b>, qancha avans olindi, qoldiq.</p></div></div>
+    <div class="step"><div class="n">✓</div><div><h3>Ish tugadi — «Yakunlandi»</h3><p>Loyihalar jadvalidagi tugma. Muddatidan <b>oldin</b> yoki <b>keyin</b> tugasa ham bosiladi — necha kun farq qilgani yoziladi.</p><span class="btn">✓ Yakunlandi</span></div></div>
+    <div class="step"><div class="n">🎨</div><div><h3>Dizayn tasdiqlandi</h3><p>Dizayner yuboradi → <b>montajnikka</b> va <b>guruhga</b>: rasm, o'lcham, bajariladigan ish.</p></div></div>
+    <div class="step"><div class="n">📐</div><div><h3>O'lchov olindi</h3><p>O'lchovlar bo'limiga kiritilsa → <b>dizaynerga alohida</b> va <b>guruhga</b> rasm bilan boradi.</p></div></div>
+  </div>
+  <div class="foot">Hammasi <b>avtomatik</b> — qo'shimcha tugma kerak emas</div>
+</section>
+
+<section class="slide" data-n="6">
+  <div class="top"><img src="../../assets/photo_2025-01-30_14-49-44.jpg" alt=""><div class="brand">Planet Print<small>Superadmin uchun</small></div><div class="num">5 / 5</div></div>
+  <h1>Guruhni ulash va <em>sozlash</em></h1>
+  <div class="body">
+    <div class="step"><div class="n">1</div><div><h3>Botni ulang (bir marta)</h3><p>Dastur → <b>Sozlamalar → Telegram bot</b> → «Bot holatini tekshirish», keyin «Botni ulash».</p></div></div>
+    <div class="step"><div class="n">2</div><div><h3>Botni guruhga qo'shing</h3><p>Ishchilar guruhi → «A'zo qo'shish» → botni tanlang. Bot guruh Chat ID'sini o'zi yozadi.</p></div></div>
+    <div class="step"><div class="n">3</div><div><h3>Guruhda yozing</h3><p><span class="code">/guruh</span> — guruh ulanadi (botga ulangan superadmin yozishi kerak).<br><span class="code">/chatid</span> — guruh ID'sini ko'rsatadi.</p></div></div>
+    <div class="step"><div class="n">4</div><div><h3>Qo'llanmani yuboring</h3><p>Sozlamalardagi «Qo'llanmani hammaga yuborish» — botga ulangan hamma shu sahifalarni oladi. Botda <span class="code">/qollanma</span> ham ishlaydi.</p></div></div>
+  </div>
+  <div class="foot">Muammo bo'lsa — <b>«Bot holatini tekshirish»</b> sababini ko'rsatadi</div>
+</section>
+
+<script>
+  const n = (location.hash || "#1").slice(1);
+  (document.querySelector(`.slide[data-n="${n}"]`) || document.querySelector(".slide")).classList.add("on");
+</script>
+</body>
+</html>

@@ -179,6 +179,49 @@ test("permissions, MAX-equivalent payment and Telegram staff registration", asyn
       assert.equal((await request("/api/auth/login", "POST", { username: "901234567", password: "phone-login-test" })).status, 401);
     } finally { context.module.exports.setTestFirestore(null); }
   });
+  await t.test("advances, measurements and completion are routed by role, personally and to the group", async () => {
+    let finance = (await request("/api/finance", "GET", null, "fallback-super-admin")).body.finance;
+    finance.workers = [{ id: "w9", name: "Vali", role: "Usta", salary: 3000000, phone: "+998 97 000 00 01" }];
+    finance.founders = [{ id: "f9", name: "Aziz", share: 40, phone: "970000002" }];
+    assert.equal((await request("/api/finance", "PUT", { finance }, "fallback-super-admin")).status, 200);
+    store.users.push({ id: "acc", username: "buxgalter", phone: "998970000009", role: "accountant", permissions: "[]" });
+    store.users.push({ id: "des", username: "dizayner", phone: "998970000008", role: "designer", permissions: '["designs"]' });
+    for (const [id, phone] of [[701, "970000001"], [702, "970000002"], [709, "970000009"], [708, "970000008"]]) {
+      await webhook({ chat: { id, type: "private" }, from: { id }, contact: { user_id: id, phone_number: phone } });
+    }
+    assert.match(sent.find(m => m.chat_id === 701).text, /Vali/);
+    assert.equal((await request("/api/telegram/config", "PUT", { groupChatId: "-100555" }, "fallback-super-admin")).status, 200);
+    const sentSince = async (change) => {
+      const before = sent.length;
+      finance = (await request("/api/finance", "GET", null, "fallback-super-admin")).body.finance;
+      change(finance);
+      assert.equal((await request("/api/finance", "PUT", { finance }, "fallback-super-admin")).status, 200);
+      return sent.slice(before);
+    };
+    // Avans zakazsiz kiritiladi: ishchining o'ziga shaxsiy, buxgalterga umumiy xabar.
+    let messages = await sentSince(f => f.expenses.push({ id: "adv1", date: "2026-10-11", type: "oylik_avans", amount: 500000, paymentType: "naqd", workerId: "w9", workerName: "Vali", allocations: [] }));
+    assert.deepEqual(messages.map(m => m.chat_id).sort(), ["701", "709"]);
+    assert.match(messages.find(m => m.chat_id === "701").text, /Sizga oylik avansi berildi[\s\S]*500 000 UZS[\s\S]*2 500 000 UZS/);
+    assert.match(messages.find(m => m.chat_id === "709").text, /Ishchiga oylik avansi berildi/);
+    messages = await sentSince(f => f.expenses.push({ id: "adv2", date: "2026-10-11", type: "founder_avans", amount: 100, paymentType: "naqd", founderId: "f9", allocations: [] }));
+    assert.deepEqual(messages.map(m => m.chat_id).sort(), ["702", "709"]);
+    assert.match(messages.find(m => m.chat_id === "702").text, /Sizga ta'sischi avansi/);
+    // O'lchov dizaynerga alohida va guruhga rasm bilan boradi, buxgalterga emas.
+    messages = await sentSince(f => f.measurements.push({ id: "m1", date: "2026-10-11", client: "Do'kon", address: "Chilonzor", workerName: "Vali", dimensions: "3 x 2 m", photoFileId: "meas-photo" }));
+    assert.deepEqual(messages.map(m => String(m.chat_id)).sort(), ["-100555", "708"]);
+    assert.ok(messages.every(m => m.photo === "meas-photo" && /3 x 2 m/.test(m.caption)));
+    messages = await sentSince(f => Object.assign(f.projects[0], { status: "Yakunlangan", completedAt: "2000-01-01", dueDate: "2000-01-03" }));
+    assert.match(messages.find(m => m.chat_id === "709").text, /Loyiha yakunlandi[\s\S]*muddatidan 2 kun oldin/);
+    // Zakazsiz oddiy xarajat hali ham rad etiladi; ishchisiz avans ham.
+    finance = (await request("/api/finance", "GET", null, "fallback-super-admin")).body.finance;
+    finance.expenses.push({ id: "bad1", date: "2026-10-11", type: "banner", amount: 5, paymentType: "naqd", allocations: [] });
+    assert.equal((await request("/api/finance", "PUT", { finance }, "fallback-super-admin")).status, 400);
+    finance.expenses[finance.expenses.length - 1] = { id: "bad1", date: "2026-10-11", type: "oylik_avans", amount: 5, paymentType: "naqd", workerId: "nobody", allocations: [] };
+    assert.equal((await request("/api/finance", "PUT", { finance }, "fallback-super-admin")).status, 400);
+    // Guruhda /chatid guruh ID sini beradi.
+    await webhook({ chat: { id: -100777, type: "supergroup" }, from: { id: 5 }, text: "/chatid@PlanetBot" });
+    assert.match(sent.at(-1).text, /-100777/);
+  });
   await t.test("deleted users cannot reuse tokens", async () => {
     store.users.length = 0;
     assert.equal((await request("/api/finance")).status, 401);

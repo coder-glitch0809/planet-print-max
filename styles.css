@@ -586,3 +586,20 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* Avans yo'riqnomasi, loyiha yakunlash tugmasi va Telegram holati */
+.advance-guide { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--border); border-left: 4px solid var(--brand); border-radius: var(--radius-sm); background: var(--brand-soft); color: var(--text-2); font-size: 13.5px; }
+.advance-guide ol { margin: 6px 0 0; padding-left: 20px; }
+.advance-guide li { margin: 3px 0; }
+.done-btn { background: var(--ok); border-color: var(--ok); color: #fff; }
+.done-btn:hover { filter: brightness(1.08); }
+td .small-btn { margin-bottom: 4px; }
+.telegram-status { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); font-size: 13.5px; }
+.tg-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; padding: 5px 0; border-bottom: 1px dashed var(--border); }
+.tg-row:last-child { border-bottom: 0; }
+.tg-row span { color: var(--muted); }
+.tg-row b { overflow-wrap: anywhere; text-align: right; }
+.tg-problem, .tg-ok { margin-bottom: 8px; padding: 8px 10px; border-radius: 8px; font-weight: 650; }
+.tg-problem { background: var(--danger-soft); color: var(--danger); }
+.tg-ok { background: var(--ok-soft); color: var(--ok); }
+.telegram-staff-list p { margin: 6px 0; overflow-wrap: anywhere; }

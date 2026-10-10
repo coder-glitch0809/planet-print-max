@@ -143,7 +143,7 @@
       measurementsBody: document.getElementById("measurementsBody"),
 
       founderForm: document.getElementById("founderForm"),
-      fName: document.getElementById("fName"), fShare: document.getElementById("fShare"), fNote: document.getElementById("fNote"),
+      fName: document.getElementById("fName"), fShare: document.getElementById("fShare"), fNote: document.getElementById("fNote"), fPhone: document.getElementById("fPhone"),
       founderSubmitBtn: document.getElementById("founderSubmitBtn"),
       founderCancelEdit: document.getElementById("founderCancelEdit"),
       founderReset: document.getElementById("founderReset"), founderMsg: document.getElementById("founderMsg"),
@@ -430,19 +430,22 @@
       el.appSection.dataset.page = visible[0] || "dashboard";
       if (el.pageHeading) el.pageHeading.textContent = pageTitle(visible[0]) || "Dashboard";
       Array.from(el.tabs.querySelectorAll(".tab")).forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const page = btn.getAttribute("data-page");
-          Array.from(el.tabs.querySelectorAll(".tab")).forEach(b => b.classList.remove("active"));
-          btn.classList.add("active");
-          el.pages.forEach((x) => x.classList.remove("active"));
-          document.getElementById(page).classList.add("active");
-          el.appSection.dataset.page = page;
-          if (el.pageHeading) el.pageHeading.textContent = pageTitle(page);
-          setSidebar(false);
-          if (page === "news") { loadNews().then(markNewsSeen); }
-          drawCharts();
-        });
+        btn.addEventListener("click", () => showPage(btn.getAttribute("data-page")));
       });
+    }
+    function showPage(page) {
+      const btn = el.tabs.querySelector(`[data-page="${page}"]`);
+      if (!btn) return false;
+      Array.from(el.tabs.querySelectorAll(".tab")).forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      el.pages.forEach((x) => x.classList.remove("active"));
+      document.getElementById(page).classList.add("active");
+      el.appSection.dataset.page = page;
+      if (el.pageHeading) el.pageHeading.textContent = pageTitle(page);
+      setSidebar(false);
+      if (page === "news") { loadNews().then(markNewsSeen); }
+      drawCharts();
+      return true;
     }
 
     function openDashboard(user) {
@@ -578,6 +581,13 @@
       if (p.startDate <= today()) return "Jarayonda";
       return "Yangi";
     }
+    // Yakunlangan zakaz muddatidan oldin, o'z vaqtida yoki kechikib topshirilganini ko'rsatadi.
+    function completionNote(p) {
+      if (p.status !== "Yakunlangan" || !p.completedAt) return "";
+      const diff = p.dueDate ? Math.round((Date.parse(`${p.dueDate}T00:00:00Z`) - Date.parse(`${p.completedAt}T00:00:00Z`)) / 86400000) : NaN;
+      const timing = !Number.isFinite(diff) ? "" : diff > 0 ? `muddatidan ${diff} kun oldin` : diff < 0 ? `${-diff} kun kechikib` : "o'z vaqtida";
+      return `${clean(p.completedAt)}${timing ? ` · ${timing}` : ""}`;
+    }
     function statusCls(s) {
       if (s === "Yakunlangan") return "pill s-done";
       if (s === "Jarayonda") return "pill s-progress";
@@ -664,14 +674,15 @@
         if (clientView) {
           return `<tr>
             <td>${clean(p.name)}</td><td>${clean(p.client || state.currentUser.username)}</td><td>${clean(p.startDate)}</td><td>${clean(p.dueDate)}</td>
-            <td><span class="${statusCls(s)}">${s}</span></td>
+            <td><span class="${statusCls(s)}">${s}</span>${completionNote(p) ? `<div class="expense-order-detail">${completionNote(p)}</div>` : ""}</td>
           </tr>`;
         }
         return `<tr>
           <td>${clean(p.name)}${p.carriedFromMonth ? `<div class="expense-order-detail">${clean(p.carriedFromMonth)} oyidan qarz bilan ko'chgan</div>` : ""}</td><td>${clean(p.client)}</td><td>${clean(p.clientLogin || "-")}</td><td>${clean(p.startDate)}</td><td>${clean(p.dueDate)}</td>
           <td>${fmt(p.amount)}</td><td>${fmt(p.advance)}</td><td>${fmt(remain)}</td><td>${clean(p.paymentType)}</td>
-          <td><span class="${statusCls(s)}">${s}</span></td>
+          <td><span class="${statusCls(s)}">${s}</span>${completionNote(p) ? `<div class="expense-order-detail">${completionNote(p)}</div>` : ""}</td>
           <td>
+            ${s === "Yakunlangan" ? "" : `<button class="small-btn done-btn" type="button" data-done-p="${clean(p.id)}">✓ Yakunlandi</button>`}
             <button class="ghost small-btn" type="button" data-edit-p="${clean(p.id)}">Tahrirlash</button>
             <button class="danger small-btn" type="button" data-del-p="${clean(p.id)}">O'chirish</button>
           </td>
@@ -687,6 +698,19 @@
         if (!confirm(`"${project.name}" zakazini o'chirasizmi?${extra}`)) return;
         if (editState.projectId === id) resetProjectForm();
         commitFinance(f => { f.projects = f.projects.filter(p => p.id !== id); }, el.projectMsg, "Zakaz o'chirildi.");
+      }));
+      // Ish muddatidan oldin yoki keyin tugasa ham bir tugma bilan yakunlanadi; sana va kechikish saqlanadi.
+      Array.from(el.projectsBody.querySelectorAll("[data-done-p]")).forEach((b) => b.addEventListener("click", () => {
+        if (blockIfPaymentLocked(el.projectMsg)) return;
+        const id = b.getAttribute("data-done-p");
+        const project = state.finance.projects.find(p => p.id === id);
+        if (!project || !confirm(`"${project.name}" zakazi yakunlandimi?\nYakunlangan sana: ${today()} (muddat: ${project.dueDate || "-"})`)) return;
+        commitFinance(f => {
+          const target = f.projects.find(p => p.id === id);
+          if (!target) return "Zakaz topilmadi.";
+          target.status = "Yakunlangan";
+          target.completedAt = today();
+        }, el.projectMsg, "Zakaz yakunlandi.");
       }));
       Array.from(el.projectsBody.querySelectorAll("[data-edit-p]")).forEach((b) => b.addEventListener("click", () => {
         const p = state.finance.projects.find(x => x.id === b.getAttribute("data-edit-p")); if (!p) return;
@@ -819,6 +843,7 @@
           <td>${clean(w.name)}<br><small>${clean(w.phone || "Telefon kiritilmagan")}</small></td><td>${clean(w.role)}</td>
           <td class="num">${fmt(w.salary)}</td><td class="num">${fmt(w.advance)}</td><td class="num">${fmt(w.paid)}</td><td class="num">${remainCell}</td>
           <td>
+            ${hasPerm("expenses") ? `<button class="small-btn" type="button" data-advance-w="${clean(w.id)}">Avans berish</button>` : ""}
             <button class="ghost small-btn" type="button" data-edit-w="${clean(w.id)}">Tahrirlash</button>
             <button class="danger small-btn" type="button" data-del-w="${clean(w.id)}">O'chirish</button>
           </td>
@@ -831,6 +856,7 @@
         if (editState.workerId === id) resetWorkerForm();
         commitFinance(f => { f.workers = f.workers.filter(w => w.id !== id); }, el.workerMsg, "Ishchi o'chirildi.");
       }));
+      Array.from(el.workersBody.querySelectorAll("[data-advance-w]")).forEach((b) => b.addEventListener("click", () => openAdvanceForm("oylik_avans", b.getAttribute("data-advance-w"))));
       Array.from(el.workersBody.querySelectorAll("[data-edit-w]")).forEach((b) => b.addEventListener("click", () => {
         const w = state.finance.workers.find(x => x.id === b.getAttribute("data-edit-w")); if (!w) return;
         editState.workerId = w.id;
@@ -865,12 +891,13 @@
       ].join("");
       if (!state.finance.founders.length) { el.foundersBody.innerHTML = `<tr><td colspan="8">Hozircha ta'sischi yo'q.</td></tr>`; return; }
       el.foundersBody.innerHTML = s.founderRows.map((f) => `<tr>
-        <td>${clean(f.name)}</td><td class="num">${num(f.share).toFixed(2)}%</td><td>${clean(f.note || "-")}</td>
+        <td>${clean(f.name)}${f.phone ? `<br><small>${clean(f.phone)}</small>` : ""}</td><td class="num">${num(f.share).toFixed(2)}%</td><td>${clean(f.note || "-")}</td>
         <td class="num">${money(f.base)}</td>
         <td class="num">${fmt(f.founderAdvance)}<div class="expense-order-detail">${founderAdvanceProjectDetails(f.id)}</div></td>
         <td class="num"><b>${money(f.final)}</b>${f.final < 0 ? (() => { const d = founderDebtParts(f); return `<div class="expense-order-detail">${d.lossShare ? `zarar ulushi ${fmt(d.lossShare)}` : ""}${d.lossShare && d.overdrawn ? "<br>" : ""}${d.overdrawn ? `ortiqcha avans ${fmt(d.overdrawn)}` : ""}</div>`; })() : ""}</td>
         <td>${founderStatus(f.final)}</td>
         <td>
+          ${hasPerm("expenses") ? `<button class="small-btn" type="button" data-advance-f="${clean(f.id)}">Avans berish</button>` : ""}
           <button class="ghost small-btn" type="button" data-edit-f="${clean(f.id)}">Tahrirlash</button>
           <button class="danger small-btn" type="button" data-del-f="${clean(f.id)}">O'chirish</button>
         </td>
@@ -882,10 +909,11 @@
         if (editState.founderId === id) resetFounderForm();
         commitFinance(f => { f.founders = f.founders.filter(x => x.id !== id); }, el.founderMsg, "Ta'sischi o'chirildi.");
       }));
+      Array.from(el.foundersBody.querySelectorAll("[data-advance-f]")).forEach((b) => b.addEventListener("click", () => openAdvanceForm("founder_avans", b.getAttribute("data-advance-f"))));
       Array.from(el.foundersBody.querySelectorAll("[data-edit-f]")).forEach((b) => b.addEventListener("click", () => {
         const f = state.finance.founders.find(x => x.id === b.getAttribute("data-edit-f")); if (!f) return;
         editState.founderId = f.id;
-        el.fName.value = f.name; el.fShare.value = f.share; el.fNote.value = f.note || "";
+        el.fName.value = f.name; el.fShare.value = f.share; el.fNote.value = f.note || ""; el.fPhone.value = f.phone || "";
         setFormEditMode(el.founderForm, el.founderSubmitBtn, el.founderCancelEdit, true);
       }));
     }
@@ -900,12 +928,35 @@
       keepValue(el.eFounderId, () => { el.eFounderId.innerHTML = state.finance.founders.map(f => `<option value="${clean(f.id)}">${clean(f.name)}</option>`).join(""); });
       renderAllocationRows();
     }
+    // Ishchi avansi/oyligi va ta'sischi avansida zakaz tanlash ixtiyoriy.
+    const PERSON_EXPENSE_TYPES = ["oylik_avans", "oylik_tolov", "founder_avans"];
+    const isPersonExpense = () => PERSON_EXPENSE_TYPES.includes(el.eType.value);
     function toggleExpenseTypeInputs() {
       const t = el.eType.value;
       el.eWorkerWrap.classList.toggle("hidden", t !== "oylik_avans" && t !== "oylik_tolov");
       el.eFounderWrap.classList.toggle("hidden", t !== "founder_avans");
+      const title = document.getElementById("allocationTitle");
+      if (title) title.textContent = isPersonExpense() ? "Zakaz (ixtiyoriy) — avans ma'lum zakaz pulidan berilgan bo'lsa tanlang" : "Zakazlarga taqsimlash";
+      const help = document.getElementById("allocationHelp");
+      if (help) {
+        help.dataset.default ||= help.textContent;
+        help.textContent = isPersonExpense() ? "Zakazni bo'sh qoldirsangiz, avans umumiy hisoblanadi. Zakaz tanlasangiz, summa shu zakazlarga to'liq taqsimlanishi kerak." : help.dataset.default;
+      }
       // Ta'sischi avansida zakaz = pul olingan zakazning o'zi, alohida "pul manbai" kerak emas.
       renderAllocationRows();
+    }
+    // Ishchilar/Ta'sischilar jadvalidagi "Avans berish" va Xarajatlardagi tezkor tugmalar shu formani ochadi.
+    function openAdvanceForm(type, personId = "") {
+      if (!showPage("expenses")) return;
+      resetExpenseForm();
+      el.eType.value = type;
+      toggleExpenseTypeInputs();
+      if (personId && type === "founder_avans") el.eFounderId.value = personId;
+      else if (personId) el.eWorkerId.value = personId;
+      renderAllocationRows([]);
+      el.expenseForm.scrollIntoView({ behavior: "smooth", block: "start" });
+      setTimeout(() => el.eAmount.focus(), 300);
+      msg(el.expenseMsg, type === "founder_avans" ? "Ta'sischi avansi: summani kiriting va saqlang." : "Ishchi avansi: summani kiriting va saqlang.", "warn");
     }
 
     function expenseAllocations(expense) {
@@ -951,11 +1002,12 @@
       })) : allocations;
       const rows = existingRows.length ? existingRows : [{ projectId: "", fundedByProjectId: "", amount: "" }];
       const founderMode = el.eType.value === "founder_avans";
+      const optional = isPersonExpense();
       el.expenseAllocations.innerHTML = rows.map((allocation, index) => `
         <div class="allocation-row${founderMode ? " no-source" : ""}" data-allocation-row>
-          <label class="allocation-select-label">${founderMode ? "Pul olingan zakaz" : "Xarajat qaysi zakaz uchun"} ${rows.length > 1 ? index + 1 : ""}<select data-allocation-project required>${allocationProjectOptions(allocation.projectId || "")}</select></label>
+          <label class="allocation-select-label">${founderMode ? "Pul olingan zakaz" : optional ? "Zakaz" : "Xarajat qaysi zakaz uchun"} ${rows.length > 1 ? index + 1 : ""}<select data-allocation-project ${optional ? "" : "required"}>${allocationProjectOptions(allocation.projectId || "", optional ? { placeholder: "Zakazsiz (umumiy)", allowEmpty: true } : {})}</select></label>
           <label class="allocation-source">Pul qaysi zakazdan olindi<select data-allocation-source>${allocationProjectOptions(allocation.fundedByProjectId && allocation.fundedByProjectId !== allocation.projectId ? allocation.fundedByProjectId : "", { placeholder: "Shu zakazning o'z pulidan", allowEmpty: true })}</select></label>
-          <label>Summa (UZS)<input data-allocation-amount inputmode="decimal" value="${clean(allocation.amount)}" placeholder="0" required /></label>
+          <label>Summa (UZS)<input data-allocation-amount inputmode="decimal" value="${clean(allocation.amount)}" placeholder="0" ${optional ? "" : "required"} /></label>
           <button class="danger small-btn" type="button" data-remove-allocation aria-label="Zakaz taqsimotini o'chirish">O'chirish</button>
         </div>`).join("");
       updateAllocationTotal();
@@ -966,6 +1018,12 @@
       const assigned = roundMoney(Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-amount]"))
         .reduce((total, input) => total + (parseMoney(input.value) || 0), 0));
       const amount = parseMoney(el.eAmount.value) || 0;
+      if (isPersonExpense() && !readExpenseAllocations().length) {
+        el.allocationTotal.textContent = "Zakazga bog'lanmagan umumiy avans — bu ham to'g'ri. Zakaz pulidan berilgan bo'lsa, zakazni tanlang.";
+        el.allocationTotal.classList.add("is-valid");
+        el.allocationTotal.classList.remove("is-invalid");
+        return;
+      }
       const matches = amount > 0 && Math.abs(assigned - amount) < 0.01;
       const diff = roundMoney(amount - assigned);
       el.allocationTotal.textContent = !amount && !assigned
@@ -977,7 +1035,11 @@
 
     function readExpenseAllocations() {
       const founderMode = el.eType.value === "founder_avans";
-      return Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-row]")).map(row => {
+      const optional = isPersonExpense();
+      return Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-row]")).filter(row =>
+        // Avansda bo'sh qoldirilgan qator hisobga olinmaydi.
+        !optional || row.querySelector("[data-allocation-project]").value || String(row.querySelector("[data-allocation-amount]").value).trim()
+      ).map(row => {
         const projectId = row.querySelector("[data-allocation-project]").value;
         const fundedBy = founderMode ? "" : (row.querySelector("[data-allocation-source]")?.value || "");
         const allocation = {
@@ -1137,7 +1199,7 @@
                 ? `<div class="expense-order-detail">puli <b>${clean(knownProjectName(sourceId, allocation.fundedByProjectName))}</b> zakazidan olingan</div>` : "";
               return `${name} <span class="expense-order-detail">(${fmt(allocation.amount)})</span>${borrowed}`;
             }).join("<br>")
-          : "Zakaz biriktirilmagan (eski yozuv)";
+          : PERSON_EXPENSE_TYPES.includes(e.type) ? "Zakazsiz (umumiy)" : "Zakaz biriktirilmagan (eski yozuv)";
         const warning = suspicious.has(e.id)
           ? `<div class="row-warning" title="Tahrirlash orqali to'g'ri zakazni yoki pul manbaini tanlang">⚠ Izohda «${clean(suspicious.get(e.id))}» bor — zakaz to'g'ri tanlanganini tekshiring</div>` : "";
         const paymentType = EXPENSE_PAYMENT_LABEL[e.paymentType] || (e.paymentType ? clean(e.paymentType) : "Ko'rsatilmagan");
@@ -2111,11 +2173,12 @@
           el.measurementSubmitBtn.disabled = false;
         }
       });
+      document.querySelectorAll("[data-quick-expense]").forEach(button => button.addEventListener("click", () => openAdvanceForm(button.dataset.quickExpense)));
       const refreshTelegramStaff = async () => {
         const status = document.getElementById("telegramStaffStatus");
         try {
           const result = await apiRequest("/api/telegram/staff");
-          document.getElementById("telegramStaffList").innerHTML = result.workers.map(w => `<p>${clean(w.name)} — ${clean(w.phone || "Telefon yo'q")} — ${w.chatId ? `Chat ID: ${clean(w.chatId)} <button type="button" class="ghost small-btn" data-unlink-worker="${clean(w.id)}">Bog'lanishni uzish</button>` : "Botga bog'lanmagan"}</p>`).join("");
+          document.getElementById("telegramStaffList").innerHTML = result.workers.map(w => `<p><b>${clean(w.name)}</b> <span class="pill s-new">${clean(w.roleName || w.role || "")}</span> ${clean(w.phone || "Telefon yo'q")} — ${w.chatId ? `<span class="pill s-done">Ulangan</span> Chat ID: ${clean(w.chatId)} <button type="button" class="ghost small-btn" data-unlink-worker="${clean(w.id)}">Bog'lanishni uzish</button>` : `<span class="pill s-over">Botga ulanmagan</span>`}</p>`).join("");
           document.querySelectorAll("[data-unlink-worker]").forEach(button => button.addEventListener("click", async () => {
             try { await apiRequest(`/api/telegram/staff/${encodeURIComponent(button.dataset.unlinkWorker)}`, { method: "DELETE" }); await refreshTelegramStaff(); }
             catch (error) { msg(status, error.message, "err"); }
@@ -2124,11 +2187,60 @@
         } catch (error) { msg(status, error.message, "err"); }
       };
       document.getElementById("telegramRefresh").addEventListener("click", refreshTelegramStaff);
+      // Bot nima uchun javob bermayotganini ko'rsatadi: token, webhook manzili va oxirgi xato.
+      const refreshTelegramStatus = async () => {
+        const box = document.getElementById("telegramStatusBox");
+        box.classList.remove("hidden");
+        box.innerHTML = "Tekshirilmoqda...";
+        try {
+          const s = await apiRequest("/api/telegram/status");
+          const row = (label, value, ok) => `<div class="tg-row"><span>${label}</span><b class="${ok === false ? "neg" : ""}">${value}</b></div>`;
+          box.innerHTML = [
+            s.problem ? `<div class="tg-problem">⚠ ${esc(s.problem)}</div>` : `<div class="tg-ok">✓ Bot ishlayapti. Xodimlar /start bosishi mumkin.</div>`,
+            row("Bot", s.bot ? `@${esc(s.bot)}` : s.token ? "-" : "Token yo'q", !!s.bot),
+            row("Webhook", esc(s.webhookUrl || "o'rnatilmagan"), !!s.webhookUrl && s.webhookUrl === s.expectedUrl),
+            row("Kutilgan manzil", esc(s.expectedUrl || "-")),
+            s.pending ? row("Navbatdagi xabarlar", String(s.pending)) : "",
+            s.lastError ? row("Oxirgi xato", `${esc(s.lastError)}${s.lastErrorAt ? ` (${new Date(s.lastErrorAt).toLocaleString("uz-UZ")})` : ""}`, false) : "",
+            row("Guruh", s.groupChatId ? `${esc(s.groupTitle || "")} ${esc(s.groupChatId)}` : "ulanmagan", !!s.groupChatId || undefined),
+            row("Rasm saqlash", s.mediaChatId ? `Media chat ${esc(s.mediaChatId)}` : "yuklovchining bot chati (avtomatik)"),
+            row("Qo'llanma rasmlari", `${s.guideImages || 0} ta`)
+          ].join("");
+          document.getElementById("tgGroupChatId").value = s.groupChatId || "";
+          document.getElementById("tgMediaChatId").value = s.mediaChatId || "";
+        } catch (error) { box.innerHTML = `<div class="tg-problem">${esc(error.message)}</div>`; }
+      };
+      document.getElementById("telegramStatusBtn").addEventListener("click", refreshTelegramStatus);
       document.getElementById("telegramSetup").addEventListener("click", async () => {
         try {
-          await apiRequest("/api/telegram/setup-webhook", { method: "POST", body: "{}" });
-          msg(document.getElementById("telegramStaffStatus"), "Bot ulandi. Endi xodimlar /start bosishi mumkin.", "ok");
+          const result = await apiRequest("/api/telegram/setup-webhook", { method: "POST", body: "{}" });
+          msg(document.getElementById("telegramStaffStatus"), `Bot ulandi (${result.url}). Endi xodimlar /start bosishi mumkin.`, "ok");
+          refreshTelegramStatus();
         } catch (error) { msg(document.getElementById("telegramStaffStatus"), error.message, "err"); }
+      });
+      document.getElementById("telegramGuideBtn").addEventListener("click", async () => {
+        const status = document.getElementById("telegramStaffStatus");
+        if (!confirm("Qo'llanma (rasmlar va matn) botga ulangan barcha xodimlarga yuborilsinmi?")) return;
+        msg(status, "Yuborilmoqda...", "warn");
+        try {
+          const result = await apiRequest("/api/telegram/send-guide", { method: "POST", body: "{}" });
+          msg(status, `Qo'llanma yuborildi: ${result.sent} ta. Yuborilmadi: ${result.failed}.`, result.failed || !result.sent ? "warn" : "ok");
+        } catch (error) { msg(status, error.message, "err"); }
+      });
+      document.getElementById("telegramConfigSave").addEventListener("click", async () => {
+        const node = document.getElementById("telegramConfigMsg");
+        try {
+          await apiRequest("/api/telegram/config", { method: "PUT", body: JSON.stringify({
+            groupChatId: document.getElementById("tgGroupChatId").value.trim(),
+            mediaChatId: document.getElementById("tgMediaChatId").value.trim()
+          }) });
+          msg(node, "Telegram sozlamalari saqlandi.", "ok");
+        } catch (error) { msg(node, error.message, "err"); }
+      });
+      document.getElementById("telegramGroupTest").addEventListener("click", async () => {
+        const node = document.getElementById("telegramConfigMsg");
+        try { await apiRequest("/api/telegram/test-group", { method: "POST", body: "{}" }); msg(node, "Guruhga test xabar yuborildi.", "ok"); }
+        catch (error) { msg(node, error.message, "err"); }
       });
       el.announcementForm.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -2214,9 +2326,12 @@
             // To'langan summa faqat to'lovlar orqali o'zgaradi; zakazning boshqa maydonlari (ko'chgan oy, mijoz ID) saqlanadi.
             const paid = num(f.projects[index].advance);
             if (rec.amount < paid) return `Zakaz summasi allaqachon to'langan ${fmt(paid)} dan kam bo'lishi mumkin emas.`;
-            f.projects[index] = { ...f.projects[index], ...rec, advance: paid };
+            const old = f.projects[index];
+            f.projects[index] = { ...old, ...rec, advance: paid };
+            if (rec.status === "Yakunlangan" && !old.completedAt) f.projects[index].completedAt = today();
+            if (rec.status !== "Yakunlangan") delete f.projects[index].completedAt;
           } else {
-            f.projects.unshift({ ...rec, advance });
+            f.projects.unshift({ ...rec, advance, ...(rec.status === "Yakunlangan" ? { completedAt: today() } : {}) });
             if (advance > 0) f.payments.unshift({
               id: uid(), projectId: rec.id, projectName: rec.name, clientName: rec.client,
               date: rec.startDate <= today() ? rec.startDate : today(), amount: advance, paymentType: rec.paymentType,
@@ -2281,8 +2396,9 @@
         e.preventDefault();
         if (blockIfPaymentLocked(el.founderMsg)) return;
         const editingId = editState.founderId;
-        const rec = { id: editingId || uid(), name: clean(el.fName.value), share: parsePercent(el.fShare.value), note: clean(el.fNote.value) };
+        const rec = { id: editingId || uid(), name: clean(el.fName.value), share: parsePercent(el.fShare.value), note: clean(el.fNote.value), phone: el.fPhone.value.replace(/\D/g, "") };
         if (!rec.name || !Number.isFinite(rec.share) || rec.share <= 0 || rec.share > 100) return msg(el.founderMsg, "Ism va foizni to'g'ri kiriting (0 dan 100 gacha).", "err");
+        if (rec.phone && !/^\d{9,15}$/.test(rec.phone)) return msg(el.founderMsg, "Telefon raqami noto'g'ri (masalan: +998901234567).", "err");
         await commitFinance(f => {
           const totalWithout = f.founders.filter(x => x.id !== rec.id).reduce((a, x) => a + num(x.share), 0);
           if (totalWithout + rec.share > 100.0001) return `Jami foiz 100% dan oshib ketadi (boshqalar: ${totalWithout.toFixed(2)}%).`;
@@ -2309,9 +2425,12 @@
         const previousIds = new Set(expenseAllocations(existingExpense || {}).flatMap(previous => [previous.projectId, previous.fundedByProjectId]).filter(Boolean));
         const knownId = id => state.finance.projects.some(project => project.id === id) || previousIds.has(id);
         const invalidProject = allocations.some(allocation => !knownId(allocation.projectId) || (allocation.fundedByProjectId && !knownId(allocation.fundedByProjectId)));
-        if (!allocations.length || invalidProject || allocations.some(allocation => !allocation.projectId || allocation.amount <= 0) ||
-            uniqueProjectIds.size !== allocations.length || Math.abs(allocationTotal - expenseAmount) >= 0.01) {
-          return msg(el.expenseMsg, "Xarajat summasini takrorlanmagan zakazlarga to'liq taqsimlang.", "err");
+        const unallocatedAdvance = isPersonExpense() && !allocations.length;
+        if (!unallocatedAdvance && (!allocations.length || invalidProject || allocations.some(allocation => !allocation.projectId || allocation.amount <= 0) ||
+            uniqueProjectIds.size !== allocations.length || Math.abs(allocationTotal - expenseAmount) >= 0.01)) {
+          return msg(el.expenseMsg, isPersonExpense()
+            ? "Zakaz tanlagan bo'lsangiz, summani to'liq taqsimlang — yoki zakazni bo'sh qoldiring."
+            : "Xarajat summasini takrorlanmagan zakazlarga to'liq taqsimlang.", "err");
         }
         const rec = {
           id: editState.expenseId || uid(),

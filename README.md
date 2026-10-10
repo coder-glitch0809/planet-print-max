@@ -95,10 +95,15 @@ Adminlar va boshqa foydalanuvchilar kartasidagi telefon raqami va mavjud paroli 
 
 Telegramni ishga tushirish:
 
-1. Server muhitida `TELEGRAM_BOT_TOKEN`, `APP_PUBLIC_URL` (saytning ochiq HTTPS manzili) va `TELEGRAM_WEBHOOK_SECRET` (tasodifiy 16–256 belgi, harf/raqam/`_`/`-`) kiriting. Namunalar `.env.example` da. Tokenlarni brauzerga kiritmang.
-2. Saytni shu manzilga joylashtirgandan keyin superadmin **Sozlamalar → Botni ulash (webhook)** tugmasini bir marta bosadi.
-3. Xodim `/start` bosadi. Bot chat IDni o‘zi oladi. Telegram telefonni avtomatik bermagani uchun xodim **Telefon raqamni yuborish** tugmasini bir marta bosadi. Bot faqat jo‘natuvchining o‘z kontaktini qabul qiladi va dasturdagi yagona mos raqamga bog‘laydi.
-4. Dizayn foydalanuvchilarning shaxsiy bot chatlariga yuboriladi. Umumiy montaj guruhiga yuborish o‘chirildi: guruh orqali ruxsatlarni chetlab o‘tish mumkin emas. Rasmlarni saqlash uchun `TELEGRAM_MEDIA_CHAT_ID` sozlamasi kerak.
+1. Server muhitida faqat `TELEGRAM_BOT_TOKEN` majburiy. `APP_PUBLIC_URL` bo'sh bo'lsa sayt manzili so'rovdan olinadi, `TELEGRAM_WEBHOOK_SECRET` bo'sh bo'lsa tokendan avtomatik yaratiladi. Tokenlarni brauzerga kiritmang.
+2. Superadmin saytni ochiq HTTPS manzilda ochib, **Sozlamalar → Telegram bot → Bot holatini tekshirish** va **Botni ulash** tugmalarini bosadi. Holat oynasi webhook manzili, oxirgi xato va bot boshqa dasturga ulanib qolganini ko'rsatadi (bir token bilan ikki dastur ishlasa, bot bu serverga xabar yubormaydi).
+3. Xodim `/start` bosadi va **📱 Telefon raqamni yuborish** tugmasini bir marta bosadi. Raqam Foydalanuvchilar kartasida bo'lsa — lavozimi bo'yicha, faqat Ishchilar/Ta'sischilar kartasida bo'lsa — shaxsiy avans xabarlari uchun bog'lanadi. **🆔 Chat ID olish** yoki `/chatid` chat ID ni ko'rsatadi, **📖 Qo'llanma** yoki `/qollanma` rasmli qo'llanmani yuboradi.
+4. Guruh: botni guruhga qo'shing va botga ulangan superadmin guruhda `/guruh` yozsin (yoki `/chatid` natijasini Sozlamalarga kiriting). Guruhga tasdiqlangan dizaynlar va yangi o'lchovlar yuboriladi.
+5. Rasm saqlash: `TELEGRAM_MEDIA_CHAT_ID` (yoki Sozlamalardagi media chat) bo'sh bo'lsa, rasm yuklovchining o'z bot chatida, u bo'lmasa superadmin chatida saqlanadi.
+
+Xabarlar lavozim bo'yicha: buxgalter — loyiha (baho, avans, yakunlanish), to'lov, xarajat va avanslar; dizayner — o'lchovlar rasm bilan; montajnik — tasdiqlangan dizayn; ishchi/ta'sischi — o'ziga berilgan avans (shaxsan). Avans va oylik zakazga bog'lanmasdan ham kiritiladi.
+
+Qo'llanma rasmlari `assets/guide/*.png`, manbasi `scripts/guide/slides.html`; o'zgartirgandan keyin `node scripts/guide/render.js` (Chrome yoki Edge kerak).
 
 Avval Ishchilar kartasi orqali ulangan xodimlar uchun telefonni foydalanuvchi kartasiga kiriting; xodim `/start` bosib kontaktini qayta yuborsin. Eski ishchi bog‘lanishlari yangi huquqlarni chetlab o‘tmaydi. Telefon o‘zgarsa eski bog‘lanish xabar olmaydi; boshqa Telegram hisobiga qayta ulashdan oldin superadmin eski bog‘lanishni uzadi.
 
