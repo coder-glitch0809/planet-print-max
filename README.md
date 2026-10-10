@@ -66,6 +66,10 @@ node scripts/test_firebase_credentials.js
 
 ## 5) Muhim
 
+- **Yangiliklar** bo'limi: dastur yangilanishlari (`changelog.js`) va kim, qachon, nimani qo'shgani/o'zgartirgani/o'chirgani. Har bir foydalanuvchi faqat ruxsati bor bo'limlar o'zgarishlarini ko'radi. Yangi versiya chiqarganda `changelog.js` ro'yxatining boshiga yozuv qo'shing. Jurnal Firebase `activityLog` kolleksiyasida saqlanadi.
+- Moliya hujjatida `revision` raqami bor: eskirgan sahifadan saqlansa server 409 qaytaradi, sahifa yangi ma'lumotni yuklaydi va amalni qayta bajarish so'raladi. Shu sababli bir vaqtda ishlagan ikki foydalanuvchi bir-birining yozuvini o'chira olmaydi.
+- `SUPER_PASS` berilmasa zaxira `Superadmin` login o'chiq. `JWT_SECRET` hostingda albatta kuchli qiymat bilan berilishi kerak.
+
 - `data/` papka server bazasi uchun (`SQLite`), `.gitignore`da ignore qilingan.
 - Productionda `JWT_SECRET` ni albatta almashtiring.
 - Bir nechta qurilmadan bir xil server URL ga kirilsa, hamma joyda bitta ma'lumotlar bazasi boshqariladi.
@@ -79,6 +83,8 @@ node scripts/test_firebase_credentials.js
 - Bo'limlar o'ziga xos rang bilan ajratilgan; tungi rejimda bo'lim rangi faqat urg'u rangiga ta'sir qiladi, fon va panellar qorong'i bo'lib qoladi.
 # planet-print-max
 # Admin huquqlari, MAX va Telegram xodimlar boti
+
+Adminlar va boshqa foydalanuvchilar kartasidagi telefon raqami va mavjud paroli bilan kirishi mumkin. `+998 90 123 45 67`, `998901234567` va `901234567` bir xil raqam sifatida tekshiriladi. Login/email orqali kirish ham saqlangan; telefonning o‘zi parolsiz kirish huquqini bermaydi.
 
 - Superadmin **Foydalanuvchilar → Tahrirlash** orqali rol va mas’ul bo‘limlarni o‘zgartiradi. Bo‘sh parol eski parolni saqlaydi. Server har so‘rovda amaldagi huquqlarni tekshiradi; eski token bekor qilingan huquqni qaytarmaydi. Yangi menyuni olish uchun sahifani yangilang.
 - **To‘lovlar → MAX** tanlangan zakazning qolgan qarzini kiritadi. To‘lovni saqlash orqali qarz yopiladi. MAX bosishning o‘zi pul tushumini saqlamaydi.

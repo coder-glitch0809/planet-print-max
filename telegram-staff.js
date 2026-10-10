@@ -148,7 +148,7 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
         const lines = changed.map(row => {
           const project = next.projects.find(p => p.id === row.projectId);
           return [row.name || row.projectName || project?.name || row.type || label,
-            row.status, row.date, row.amount != null ? `${row.amount} UZS` : "", row.note].filter(Boolean).join(" | ");
+            row.status, row.date, row.amount != null ? `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(Number(row.amount) || 0).replace(/ /g, " ")} UZS` : "", row.note].filter(Boolean).join(" | ");
         });
         const result = await deliver(category, `${label}: ${changed.length} ta yangilik\n${lines.join("\n")}`, next);
         if (result.failed) warnings.push(`${label}: ${result.failed} ta Telegram xabari yuborilmadi.`);

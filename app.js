@@ -1,18 +1,4 @@
-﻿// Firebase configuration - replace with your config
-    const firebaseConfig = {
-      apiKey: "AIzaSyDemoReplaceWithRealKey",
-      authDomain: "planet-print-94419.firebaseapp.com",
-      projectId: "planet-print-94419",
-      storageBucket: "planet-print-94419.appspot.com",
-      messagingSenderId: "109297506818143954418",
-      appId: "1:109297506818143954418:web:replacewithrealappid"
-    };
-    
-    // Initialize Firebase
-    firebase.initializeApp(firebaseConfig);
-    const auth = firebase.auth();
-
-const TOKEN_KEY = "pp_token_v1";
+﻿const TOKEN_KEY = "pp_token_v1";
     const THEME_KEY = "pp_theme_v3";
     let needsSetup = false;
 
@@ -48,6 +34,7 @@ const TOKEN_KEY = "pp_token_v1";
       reports: "Hisobotlar",
       measurements: "O'lchovlar",
       archive: "Arxiv",
+      news: "Yangiliklar",
       users: "Foydalanuvchilar",
       settings: "Sozlamalar"
     };
@@ -59,7 +46,10 @@ const TOKEN_KEY = "pp_token_v1";
     const state = {
       finance: { projects: [], payments: [], workers: [], founders: [], expenses: [], archives: [], measurements: [], designs: [], payment: { locked: false, reminder: false, currentMonth: "", lastPaidMonth: "" }, settings: { tax: 0, reserve: 0, other: 0 } },
       users: [],
-      currentUser: null
+      currentUser: null,
+      revision: 0,
+      financeLoaded: false,
+      news: { changelog: [], activity: [] }
     };
 
     const el = {
@@ -77,7 +67,6 @@ const TOKEN_KEY = "pp_token_v1";
   loginPass: document.getElementById("loginPass"),
       loginShow: document.getElementById("loginShow"),
       loginMsg: document.getElementById("loginMsg"),
-  googleBtn: document.getElementById("googleBtn"),
       appSection: document.getElementById("appSection"),
       sidebar: document.getElementById("sidebar"),
       sidebarBackdrop: document.getElementById("sidebarBackdrop"),
@@ -189,6 +178,12 @@ const TOKEN_KEY = "pp_token_v1";
       exportReportBtn: document.getElementById("exportReportBtn"),
       archiveBody: document.getElementById("archiveBody"),
       archiveSummary: document.getElementById("archiveSummary"),
+      archiveMsg: document.getElementById("archiveMsg"),
+      newsChangelog: document.getElementById("newsChangelog"),
+      newsActivity: document.getElementById("newsActivity"),
+      newsFilter: document.getElementById("newsFilter"),
+      newsRefresh: document.getElementById("newsRefresh"),
+      newsMsg: document.getElementById("newsMsg"),
       paymentLock: document.getElementById("paymentLock"),
       paymentLockTitle: document.getElementById("paymentLockTitle"),
       paymentLockText: document.getElementById("paymentLockText"),
@@ -214,8 +209,25 @@ const TOKEN_KEY = "pp_token_v1";
       const n = Number(String(v ?? "").replace(/\s/g, "").replace(/,/g, ".").replace(/[^0-9.-]/g, ""));
       return Number.isFinite(n) ? n : 0;
     };
-    const uid = () => Math.random().toString(36).slice(2, 10);
-    const today = () => new Date().toISOString().slice(0, 10);
+    // Pul summasi: "1 500 000", "1.500.000", "1,500,000" => 1500000; "1500,50" => 1500.5.
+    // Noto'g'ri yozilgan summa NaN qaytaradi (jimgina 0 yoki 1.5 bo'lib qolmasligi uchun).
+    function parseMoney(value) {
+      const raw = String(value ?? "").replace(/(uzs|so'?m|сум)\s*$/i, "").replace(/[\s\u00a0'’]/g, "");
+      if (!raw) return NaN;
+      if (/^\d{1,3}([.,]\d{3})+$/.test(raw)) return Number(raw.replace(/[.,]/g, ""));
+      if (/^\d+([.,]\d{1,2})?$/.test(raw)) return Number(raw.replace(",", "."));
+      return NaN;
+    }
+    const roundMoney = (value) => Math.round((Number(value) || 0) * 100) / 100;
+    function parsePercent(value) {
+      const raw = String(value ?? "").replace(/[\s%]/g, "");
+      if (!raw) return 0;
+      return /^\d+([.,]\d+)?$/.test(raw) ? Number(raw.replace(",", ".")) : NaN;
+    }
+    const uid = () => (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "").slice(0, 12) : Math.random().toString(36).slice(2, 12));
+    // Sana doim Toshkent vaqti bo'yicha (UTC bo'yicha olinsa, tun 00:00–05:00 da kechagi sana yozilardi).
+    const tashkentDate = (date = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tashkent", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+    const today = () => tashkentDate();
 
     function msg(node, text, cls) { node.className = "msg " + (cls || ""); node.textContent = text || ""; }
 
@@ -244,15 +256,9 @@ const TOKEN_KEY = "pp_token_v1";
       return data;
     }
 
-    // Exchange Firebase ID token (from Google sign-in) for server JWT
-    async function exchangeGoogleIdToken(idToken) {
-      const resp = await fetch('/api/auth/google', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken }) });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(data.error || 'Exchange failed');
-      return data;
-    }
-
-    function applyFinanceSnapshot(saved) {
+    function applyFinanceSnapshot(saved, revision) {
+      if (revision !== undefined) state.revision = Number(revision) || 0;
+      state.financeLoaded = true;
       state.finance.projects = Array.isArray(saved.projects) ? saved.projects : [];
       state.finance.payments = Array.isArray(saved.payments) ? saved.payments : [];
       state.finance.workers = Array.isArray(saved.workers) ? saved.workers : [];
@@ -270,19 +276,63 @@ const TOKEN_KEY = "pp_token_v1";
     async function loadFinance() {
       try {
         const data = await apiRequest("/api/finance");
-        applyFinanceSnapshot(data.finance || {});
-      } catch {
-        state.finance = { projects: [], payments: [], workers: [], founders: [], expenses: [], archives: [], measurements: [], designs: [], payment: { locked: false, reminder: false, currentMonth: "", lastPaidMonth: "" }, settings: { tax: 0, reserve: 0, other: 0 } };
+        applyFinanceSnapshot(data.finance || {}, data.revision);
+        setLoadError("");
+        return true;
+      } catch (err) {
+        // Yuklanmagan bo'sh holatdan saqlash bazani tozalab yuborardi: saqlash bloklanadi.
+        state.financeLoaded = false;
+        setLoadError(`Ma'lumotlar yuklanmadi: ${err.message || "server javob bermadi"}. Sahifani yangilang. Yuklanmaguncha saqlash o'chirilgan.`);
+        return false;
       }
     }
-    async function saveFinance() {
+    function setLoadError(text) {
+      const node = document.getElementById("loadError");
+      if (!node) return;
+      node.textContent = text;
+      node.classList.toggle("hidden", !text);
+    }
+    let saving = false;
+    // Barcha o'zgarishlar shu yerdan o'tadi: o'zgarish nusxada qilinadi, server qabul qilsagina ekranga qo'llanadi.
+    // Server boshqa foydalanuvchi o'zgartirganini aytsa (409), yangi ma'lumot yuklanadi.
+    async function commitFinance(mutate, node, okText, onSuccess) {
+      if (!state.financeLoaded) { if (node) msg(node, "Ma'lumotlar yuklanmagan. Sahifani yangilang.", "err"); return false; }
+      if (saving) { if (node) msg(node, "Oldingi saqlash tugashini kuting.", "warn"); return false; }
+      const draft = structuredClone(state.finance);
       try {
-        const result = await apiRequest("/api/finance", { method: "PUT", body: JSON.stringify({ finance: state.finance }) });
-        if (result.warnings?.length) msg(el.announcementMsg, result.warnings.join(" "), "warn");
-        return true;
-      } catch (e) {
-        console.error("Server save finance error:", e);
+        const problem = mutate(draft);
+        if (problem) { if (node) msg(node, problem, "err"); return false; }
+      } catch (err) {
+        if (node) msg(node, err.message || "Xatolik.", "err");
         return false;
+      }
+      saving = true;
+      try {
+        const token = localStorage.getItem(TOKEN_KEY);
+        const { resp, data } = await fetchJson("/api/finance", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ finance: draft, revision: state.revision })
+        });
+        if (resp.status === 409) {
+          await loadFinance();
+          refreshAll();
+          if (node) msg(node, data.error || "Ma'lumotlar yangilandi. Amalni qayta bajaring.", "warn");
+          return false;
+        }
+        if (!resp.ok) { if (node) msg(node, data.error || "Saqlashda xatolik yuz berdi.", "err"); return false; }
+        state.finance = draft;
+        state.revision = Number(data.revision) || state.revision;
+        if (onSuccess) onSuccess();
+        refreshAll();
+        if (node) msg(node, data.warnings?.length ? `${okText || "Saqlandi."} ${data.warnings.join(" ")}` : (okText || "Saqlandi."), data.warnings?.length ? "warn" : "ok");
+        loadNews();
+        return true;
+      } catch (err) {
+        if (node) msg(node, err.name === "AbortError" ? "Server javob bermadi. Saqlanganini sahifani yangilab tekshiring." : (err.message || "Server bilan aloqa yo'q."), "err");
+        return false;
+      } finally {
+        saving = false;
       }
     }
     async function loadUsers() {
@@ -370,7 +420,8 @@ const TOKEN_KEY = "pp_token_v1";
           : page === "designs" ? hasPerm("designs") || canEditProjects() : hasPerm(page));
       if (!isClientUser() && !visible.includes("archive") && (isSuperAdmin() || hasPerm("dashboard") || hasPerm("projects") || hasPerm("expenses"))) visible.splice(Math.max(visible.length - 1, 0), 0, "archive");
       if (state.currentUser.role === "super_admin") visible.splice(visible.length - 1, 0, "users");
-      el.tabs.innerHTML = visible.map((p, i) => `<button class="tab ${i === 0 ? "active" : ""}" data-page="${p}">${pageTitle(p)}</button>`).join("");
+      if (!isClientUser()) visible.splice(Math.min(1, visible.length), 0, "news");
+      el.tabs.innerHTML = visible.map((p, i) => `<button class="tab ${i === 0 ? "active" : ""}" data-page="${p}">${pageTitle(p)}${p === "news" ? `<span id="newsBadge" class="tab-badge hidden"></span>` : ""}</button>`).join("");
       el.pages.forEach((x) => x.classList.remove("active"));
       if (visible[0]) document.getElementById(visible[0]).classList.add("active");
       el.appSection.dataset.page = visible[0] || "dashboard";
@@ -385,6 +436,7 @@ const TOKEN_KEY = "pp_token_v1";
           el.appSection.dataset.page = page;
           if (el.pageHeading) el.pageHeading.textContent = pageTitle(page);
           setSidebar(false);
+          if (page === "news") { loadNews().then(markNewsSeen); }
           drawCharts();
         });
       });
@@ -443,7 +495,12 @@ const TOKEN_KEY = "pp_token_v1";
     }
 
     function summary() {
-      const totalAmount = state.finance.projects.reduce((a, p) => a + num(p.amount), 0);
+      // O'tgan oydan qarzi bilan ko'chgan zakazning summasi o'z oyida hisoblangan:
+      // bu oyning soliq/zaxira/ta'sischi fondiga qayta qo'shilsa, daromad ikki marta hisoblanadi.
+      const monthProjects = state.finance.projects.filter(p => !p.carriedFromMonth);
+      const carriedProjects = state.finance.projects.filter(p => p.carriedFromMonth);
+      const totalAmount = monthProjects.reduce((a, p) => a + num(p.amount), 0);
+      const carriedDebt = carriedProjects.reduce((a, p) => a + Math.max(num(p.amount) - num(p.advance), 0), 0);
       const totalAdvance = state.finance.projects.reduce((a, p) => a + num(p.advance), 0);
       const receivable = state.finance.projects.reduce((a, p) => a + Math.max(num(p.amount) - num(p.advance), 0), 0);
 
@@ -484,7 +541,7 @@ const TOKEN_KEY = "pp_token_v1";
       const completedProjects = state.finance.projects.filter(p => liveStatus(p) === "Yakunlangan").length;
 
       return {
-        totalAmount, totalAdvance, receivable, salaryFundBase, workerAdvanceTotal, workerSalaryPaidTotal, salaryPayableNow,
+        totalAmount, carriedCount: carriedProjects.length, carriedDebt, totalAdvance, receivable, salaryFundBase, workerAdvanceTotal, workerSalaryPaidTotal, salaryPayableNow,
         tax, reserve, manualOther, expenseByType, expensePaymentByType, explicitExpense, totalRealExpenses,
         founderPoolRaw, founderPool, founderShareTotal, founderRows, founderAdvanceTotal,
         overdueProjects, dueTodayProjects, completedProjects
@@ -519,7 +576,7 @@ const TOKEN_KEY = "pp_token_v1";
       el.kpiGrid.innerHTML = items.map(x => `<div class="kpi card ${x.cls}"><div><h3>${x.t}</h3><div class="v">${x.v}</div></div><div class="meta">${x.meta}</div></div>`).join("");
       renderDashboardPeriod();
       el.formulaList.innerHTML = [
-        `Loyiha summasi = ${fmt(s.totalAmount)}`,
+        `Shu oy olingan zakazlar summasi = ${fmt(s.totalAmount)}${s.carriedCount ? ` (o'tgan oydan ko'chgan ${s.carriedCount} ta zakaz qayta qo'shilmaydi, ularning qarzi: ${fmt(s.carriedDebt)})` : ""}`,
         `Xarajatlar = Qo'lda (${fmt(s.manualOther)}) + Soliq (${fmt(s.tax)}) + Zaxira (${fmt(s.reserve)}) + Xarajat bo'limi (${fmt(s.explicitExpense)})`,
         `Ishchi avansi xarajatga kiradi va "Oylik maosh avansi" turida yuritiladi: ${fmt(s.workerAdvanceTotal)}`,
         `Ta'sischi avansi xarajat emas, ta'sischining ulushidan ayriladi: ${fmt(s.founderAdvanceTotal)}`,
@@ -580,18 +637,25 @@ const TOKEN_KEY = "pp_token_v1";
           </tr>`;
         }
         return `<tr>
-          <td>${clean(p.name)}</td><td>${clean(p.client)}</td><td>${clean(p.clientLogin || "-")}</td><td>${clean(p.startDate)}</td><td>${clean(p.dueDate)}</td>
+          <td>${clean(p.name)}${p.carriedFromMonth ? `<div class="expense-order-detail">${clean(p.carriedFromMonth)} oyidan qarz bilan ko'chgan</div>` : ""}</td><td>${clean(p.client)}</td><td>${clean(p.clientLogin || "-")}</td><td>${clean(p.startDate)}</td><td>${clean(p.dueDate)}</td>
           <td>${fmt(p.amount)}</td><td>${fmt(p.advance)}</td><td>${fmt(remain)}</td><td>${clean(p.paymentType)}</td>
           <td><span class="${statusCls(s)}">${s}</span></td>
           <td>
-            <button class="ghost small-btn" type="button" data-edit-p="${p.id}">Tahrirlash</button>
-            <button class="danger small-btn" type="button" data-del-p="${p.id}">O'chirish</button>
+            <button class="ghost small-btn" type="button" data-edit-p="${clean(p.id)}">Tahrirlash</button>
+            <button class="danger small-btn" type="button" data-del-p="${clean(p.id)}">O'chirish</button>
           </td>
         </tr>`;
       }).join("");
       Array.from(el.projectsBody.querySelectorAll("[data-del-p]")).forEach((b) => b.addEventListener("click", () => {
-        state.finance.projects = state.finance.projects.filter(p => p.id !== b.getAttribute("data-del-p"));
-        saveFinance(); refreshAll();
+        const id = b.getAttribute("data-del-p");
+        const project = state.finance.projects.find(p => p.id === id);
+        if (!project) return;
+        const paid = state.finance.payments.filter(p => p.projectId === id).length;
+        const spent = state.finance.expenses.filter(e => expenseAllocations(e).some(a => a.projectId === id)).length;
+        const extra = paid || spent ? `\nUnga ${paid} ta to'lov va ${spent} ta xarajat bog'langan: ular hisobotda qoladi, zakaz qarzi esa o'chadi.` : "";
+        if (!confirm(`"${project.name}" zakazini o'chirasizmi?${extra}`)) return;
+        if (editState.projectId === id) resetProjectForm();
+        commitFinance(f => { f.projects = f.projects.filter(p => p.id !== id); }, el.projectMsg, "Zakaz o'chirildi.");
       }));
       Array.from(el.projectsBody.querySelectorAll("[data-edit-p]")).forEach((b) => b.addEventListener("click", () => {
         const p = state.finance.projects.find(x => x.id === b.getAttribute("data-edit-p")); if (!p) return;
@@ -608,8 +672,8 @@ const TOKEN_KEY = "pp_token_v1";
       const options = state.finance.projects.map(project =>
         `<option value="${clean(project.id)}">${clean(project.name)} — ${clean(project.client)}</option>`
       ).join("");
-      el.designProject.innerHTML = `<option value="">Zakazni tanlang</option>${options}`;
-      el.measurementProject.innerHTML = `<option value="">Zakazsiz</option>${options}`;
+      keepValue(el.designProject, () => { el.designProject.innerHTML = `<option value="">Zakazni tanlang</option>${options}`; });
+      keepValue(el.measurementProject, () => { el.measurementProject.innerHTML = `<option value="">Zakazsiz</option>${options}`; });
       el.designForm.closest(".design-panel").classList.toggle("hidden", !hasPerm("designs") && !canEditProjects());
       el.designForm.classList.toggle("hidden", ["worker", "viewer", "client"].includes(state.currentUser?.role));
       el.measurementForm.classList.toggle("hidden", !hasPerm("measurements") || ["viewer", "client"].includes(state.currentUser?.role));
@@ -702,15 +766,13 @@ const TOKEN_KEY = "pp_token_v1";
           designId: design.id
         })
       });
-      const index = state.finance.designs.findIndex(item => item.id === design.id);
-      if (index >= 0) {
-        state.finance.designs[index] = {
-          ...state.finance.designs[index],
-          sent: result.delivery.failed === 0,
-          telegramMessageId: result.messageId,
-          sentAt: new Date().toISOString()
-        };
-        if (!await saveFinance()) throw new Error("Telegramga yuborildi, lekin yuborilgan holatini bazaga saqlab bo'lmadi.");
+      if (state.finance.designs.some(item => item.id === design.id)) {
+        const saved = await commitFinance(f => {
+          const target = f.designs.find(item => item.id === design.id);
+          if (!target) return "Dizayn topilmadi.";
+          Object.assign(target, { sent: result.delivery.failed === 0, telegramMessageId: result.messageId, sentAt: new Date().toISOString() });
+        }, null);
+        if (!saved) throw new Error("Telegramga yuborildi, lekin yuborilgan holatini bazaga saqlab bo'lmadi.");
       }
       renderDesigns();
       if (result.delivery.failed) throw new Error(`${result.delivery.sent} ta xodimga yuborildi, ${result.delivery.failed} tasiga yuborilmadi. Qayta yuborish mumkin.`);
@@ -727,15 +789,17 @@ const TOKEN_KEY = "pp_token_v1";
         return `<tr>
           <td>${clean(w.name)}<br><small>${clean(w.phone || "Telefon kiritilmagan")}</small></td><td>${clean(w.role)}</td><td>${fmt(w.salary)}</td><td>${fmt(av)}</td><td>${fmt(paid)}</td><td>${fmt(remain)}</td>
           <td>
-            <button class="ghost small-btn" type="button" data-edit-w="${w.id}">Tahrirlash</button>
-            <button class="danger small-btn" type="button" data-del-w="${w.id}">O'chirish</button>
+            <button class="ghost small-btn" type="button" data-edit-w="${clean(w.id)}">Tahrirlash</button>
+            <button class="danger small-btn" type="button" data-del-w="${clean(w.id)}">O'chirish</button>
           </td>
         </tr>`;
       }).join("");
       Array.from(el.workersBody.querySelectorAll("[data-del-w]")).forEach((b) => b.addEventListener("click", () => {
         const id = b.getAttribute("data-del-w");
-        state.finance.workers = state.finance.workers.filter(w => w.id !== id);
-        saveFinance(); refreshAll();
+        const worker = state.finance.workers.find(w => w.id === id);
+        if (!worker || !confirm(`"${worker.name}" ishchisini o'chirasizmi? Unga berilgan avans va oyliklar xarajatlarda qoladi.`)) return;
+        if (editState.workerId === id) resetWorkerForm();
+        commitFinance(f => { f.workers = f.workers.filter(w => w.id !== id); }, el.workerMsg, "Ishchi o'chirildi.");
       }));
       Array.from(el.workersBody.querySelectorAll("[data-edit-w]")).forEach((b) => b.addEventListener("click", () => {
         const w = state.finance.workers.find(x => x.id === b.getAttribute("data-edit-w")); if (!w) return;
@@ -750,7 +814,8 @@ const TOKEN_KEY = "pp_token_v1";
       const s = summary();
       const finalTotal = s.founderRows.reduce((a, f) => a + num(f.final), 0);
       el.founderCalcList.innerHTML = [
-        `<li>Loyiha summasi: ${fmt(s.totalAmount)}</li>`,
+        `<li>Shu oy olingan zakazlar summasi: ${fmt(s.totalAmount)}</li>`,
+        ...(s.carriedCount ? [`<li>O'tgan oydan ko'chgan zakazlar: ${s.carriedCount} ta, qolgan qarz ${fmt(s.carriedDebt)} (daromadi o'z oyida hisoblangan)</li>`] : []),
         `<li>Soliq: ${fmt(s.tax)}</li>`,
         `<li>Zaxira: ${fmt(s.reserve)}</li>`,
         `<li>Qo'lda kiritilgan umumiy xarajat: ${fmt(s.manualOther)}</li>`,
@@ -765,14 +830,16 @@ const TOKEN_KEY = "pp_token_v1";
         <td>${clean(f.name)}</td><td>${num(f.share).toFixed(2)}%</td><td>${clean(f.note || "-")}</td>
         <td>${fmt(f.base)}</td><td>${fmt(f.founderAdvance)}<div class="expense-order-detail">${founderAdvanceProjectDetails(f.id)}</div></td><td>${fmt(f.final)}</td>
         <td>
-          <button class="ghost small-btn" type="button" data-edit-f="${f.id}">Tahrirlash</button>
-          <button class="danger small-btn" type="button" data-del-f="${f.id}">O'chirish</button>
+          <button class="ghost small-btn" type="button" data-edit-f="${clean(f.id)}">Tahrirlash</button>
+          <button class="danger small-btn" type="button" data-del-f="${clean(f.id)}">O'chirish</button>
         </td>
       </tr>`).join("");
       Array.from(el.foundersBody.querySelectorAll("[data-del-f]")).forEach((b) => b.addEventListener("click", () => {
         const id = b.getAttribute("data-del-f");
-        state.finance.founders = state.finance.founders.filter(f => f.id !== id);
-        saveFinance(); refreshAll();
+        const founder = state.finance.founders.find(f => f.id === id);
+        if (!founder || !confirm(`"${founder.name}" ta'sischini o'chirasizmi?`)) return;
+        if (editState.founderId === id) resetFounderForm();
+        commitFinance(f => { f.founders = f.founders.filter(x => x.id !== id); }, el.founderMsg, "Ta'sischi o'chirildi.");
       }));
       Array.from(el.foundersBody.querySelectorAll("[data-edit-f]")).forEach((b) => b.addEventListener("click", () => {
         const f = state.finance.founders.find(x => x.id === b.getAttribute("data-edit-f")); if (!f) return;
@@ -782,9 +849,14 @@ const TOKEN_KEY = "pp_token_v1";
       }));
     }
 
+    function keepValue(select, render) {
+      const previous = select.value;
+      render();
+      if (previous && Array.from(select.options).some(option => option.value === previous)) select.value = previous;
+    }
     function fillExpenseRelatedSelects() {
-      el.eWorkerId.innerHTML = state.finance.workers.map(w => `<option value="${w.id}">${clean(w.name)} (${clean(w.role)})</option>`).join("");
-      el.eFounderId.innerHTML = state.finance.founders.map(f => `<option value="${f.id}">${clean(f.name)}</option>`).join("");
+      keepValue(el.eWorkerId, () => { el.eWorkerId.innerHTML = state.finance.workers.map(w => `<option value="${clean(w.id)}">${clean(w.name)} (${clean(w.role)})</option>`).join(""); });
+      keepValue(el.eFounderId, () => { el.eFounderId.innerHTML = state.finance.founders.map(f => `<option value="${clean(f.id)}">${clean(f.name)}</option>`).join(""); });
       renderAllocationRows();
     }
     function toggleExpenseTypeInputs() {
@@ -831,8 +903,8 @@ const TOKEN_KEY = "pp_token_v1";
     function updateAllocationTotal() {
       if (!el.allocationTotal || !el.expenseAllocations) return;
       const assigned = Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-amount]"))
-        .reduce((total, input) => total + num(input.value), 0);
-      const amount = num(el.eAmount.value);
+        .reduce((total, input) => total + (parseMoney(input.value) || 0), 0);
+      const amount = parseMoney(el.eAmount.value) || 0;
       const matches = amount > 0 && Math.abs(assigned - amount) < 0.01;
       el.allocationTotal.textContent = `Taqsimlangan: ${fmt(assigned)} / ${fmt(amount)}${matches ? " — to'liq" : " — qolgan summa taqsimlanmagan"}`;
       el.allocationTotal.classList.toggle("is-valid", matches);
@@ -848,7 +920,7 @@ const TOKEN_KEY = "pp_token_v1";
         return {
           projectId,
           projectName: project?.name || oldAllocation?.projectName || "",
-          amount: num(row.querySelector("[data-allocation-amount]").value)
+          amount: parseMoney(row.querySelector("[data-allocation-amount]").value)
         };
       });
     }
@@ -956,14 +1028,17 @@ const TOKEN_KEY = "pp_token_v1";
         return `<tr>
           <td>${clean(e.date)}</td><td>${EXPENSE_LABEL[e.type] || clean(e.type)}</td><td>${fmt(e.amount)}</td><td>${paymentType}</td><td>${clean(target)}</td><td>${sourceProject}</td><td>${clean(e.note || "-")}</td>
           <td>
-            <button class="ghost small-btn" type="button" data-edit-e="${e.id}">Tahrirlash</button>
-            <button class="danger small-btn" type="button" data-del-e="${e.id}">O'chirish</button>
+            <button class="ghost small-btn" type="button" data-edit-e="${clean(e.id)}">Tahrirlash</button>
+            <button class="danger small-btn" type="button" data-del-e="${clean(e.id)}">O'chirish</button>
           </td>
         </tr>`;
       }).join("");
       Array.from(el.expensesBody.querySelectorAll("[data-del-e]")).forEach((b) => b.addEventListener("click", () => {
-        state.finance.expenses = state.finance.expenses.filter(e => e.id !== b.getAttribute("data-del-e"));
-        saveFinance(); refreshAll();
+        const id = b.getAttribute("data-del-e");
+        const expense = state.finance.expenses.find(e => e.id === id);
+        if (!expense || !confirm(`${EXPENSE_LABEL[expense.type] || expense.type} xarajatini (${fmt(expense.amount)}) o'chirasizmi?`)) return;
+        if (editState.expenseId === id) resetExpenseForm();
+        commitFinance(f => { f.expenses = f.expenses.filter(e => e.id !== id); }, el.expenseMsg, "Xarajat o'chirildi.");
       }));
       Array.from(el.expensesBody.querySelectorAll("[data-edit-e]")).forEach((b) => b.addEventListener("click", () => {
         const e = state.finance.expenses.find(x => x.id === b.getAttribute("data-edit-e")); if (!e) return;
@@ -979,10 +1054,10 @@ const TOKEN_KEY = "pp_token_v1";
 
     function fillPaymentProjectSelect() {
       if (!el.paymentProjectId) return;
-      el.paymentProjectId.innerHTML = state.finance.projects.map(project => {
+      keepValue(el.paymentProjectId, () => el.paymentProjectId.innerHTML = state.finance.projects.map(project => {
         const due = Math.max(num(project.amount) - num(project.advance), 0);
         return `<option value="${clean(project.id)}">${clean(project.name)} — qolgan ${fmt(due)}</option>`;
-      }).join("");
+      }).join(""));
     }
 
     function renderPayments() {
@@ -1001,21 +1076,18 @@ const TOKEN_KEY = "pp_token_v1";
           <td><button class="danger small-btn" type="button" data-delete-payment="${clean(payment.id)}">O'chirish</button></td>
         </tr>`;
       }).join("");
-      Array.from(el.paymentsBody.querySelectorAll("[data-delete-payment]")).forEach(button => button.addEventListener("click", async () => {
-        const payment = state.finance.payments.find(item => item.id === button.getAttribute("data-delete-payment"));
-        if (!payment) return;
-        const project = state.finance.projects.find(item => item.id === payment.projectId);
-        const previousAdvance = project?.advance;
-        const previousPayments = [...state.finance.payments];
-        if (project) project.advance = Math.max(num(project.advance) - num(payment.amount), 0);
-        state.finance.payments = state.finance.payments.filter(item => item.id !== payment.id);
-        const saved = await saveFinance();
-        if (!saved) {
-          if (project) project.advance = previousAdvance;
-          state.finance.payments = previousPayments;
-          return msg(el.paymentMsg, "To'lovni o'chirishda saqlash xatosi yuz berdi.", "err");
-        }
-        refreshAll();
+      Array.from(el.paymentsBody.querySelectorAll("[data-delete-payment]")).forEach(button => button.addEventListener("click", () => {
+        const id = button.getAttribute("data-delete-payment");
+        const payment = state.finance.payments.find(item => item.id === id);
+        if (!payment || !confirm(`${fmt(payment.amount)} to'lovni o'chirasizmi? Zakaz qarzi shu summaga ko'payadi.`)) return;
+        commitFinance(f => {
+          const target = f.payments.find(item => item.id === id);
+          if (!target) return "To'lov topilmadi.";
+          const project = f.projects.find(item => item.id === target.projectId);
+          // Advance to'lovlar yig'indisiga teng bo'lishi kerak: server ham shuni tekshiradi.
+          if (project) project.advance = Math.max(num(project.advance) - num(target.amount), 0);
+          f.payments = f.payments.filter(item => item.id !== id);
+        }, el.paymentMsg, "To'lov o'chirildi.");
       }));
     }
 
@@ -1068,7 +1140,7 @@ const TOKEN_KEY = "pp_token_v1";
             <td>${fmt(p.advance)}</td>
             <td>${fmt(debt)}</td>
             <td><span class="${closed ? "pill s-done" : "pill s-over"}">${closed ? "Qarz yopilgan" : "Qarz ochiq"}</span></td>
-            <td>${isSuperAdmin() && !closed ? `<button class="ghost small-btn" type="button" data-close-debt="${archive.id}|${p.id}">Qarz yopildi</button>` : "-"}</td>
+            <td>${isSuperAdmin() && !closed ? `<button class="ghost small-btn" type="button" data-close-debt="${clean(archive.id)}|${clean(p.id)}">Qarz yopildi</button>` : "-"}</td>
           </tr>`);
         });
         const workers = Array.isArray(archive.workers) ? archive.workers.length : 0;
@@ -1085,17 +1157,15 @@ const TOKEN_KEY = "pp_token_v1";
       });
 
       el.archiveBody.innerHTML = rows.join("");
-      Array.from(el.archiveBody.querySelectorAll("[data-close-debt]")).forEach((btn) => btn.addEventListener("click", async () => {
+      Array.from(el.archiveBody.querySelectorAll("[data-close-debt]")).forEach((btn) => btn.addEventListener("click", () => {
         const [archiveId, projectId] = String(btn.getAttribute("data-close-debt") || "").split("|");
-        state.finance.archives = (state.finance.archives || []).map((archive) => {
-          if (archive.id !== archiveId) return archive;
-          return {
+        if (!confirm("Bu arxiv zakazi qarzini yopilgan deb belgilaysizmi? To'lov yozuvi yaratilmaydi.")) return;
+        commitFinance(f => {
+          f.archives = (f.archives || []).map((archive) => archive.id !== archiveId ? archive : {
             ...archive,
             projects: (archive.projects || []).map((project) => project.id === projectId ? { ...project, debtClosed: true, debtClosedAt: new Date().toISOString() } : project)
-          };
-        });
-        const ok = await saveFinance();
-        if (ok) refreshAll();
+          });
+        }, el.archiveMsg, "Qarz yopildi.");
       }));
       Array.from(el.archiveBody.querySelectorAll("[data-open-photo]")).forEach((btn) => btn.addEventListener("click", async () => {
         try { await showTelegramPhoto(btn.dataset.openPhoto); }
@@ -1144,6 +1214,8 @@ const TOKEN_KEY = "pp_token_v1";
       state.finance.expenses.forEach(expense => rows.push({ kind: "expense", record: expense, fallbackMonth: "", archived: false }));
       return rows.map(row => ({
         ...row,
+        // Ta'sischi avansi foydani taqsimlash: xarajat emas, alohida hisoblanadi.
+        kind: row.kind === "expense" && row.record.type === "founder_avans" ? "founder" : row.kind,
         month: /^\d{4}-\d{2}/.test(String(row.record.date || ""))
           ? String(row.record.date).slice(0, 7)
           : row.fallbackMonth
@@ -1185,6 +1257,7 @@ const TOKEN_KEY = "pp_token_v1";
         label: MONTH_LABELS[index],
         income: 0,
         expenses: 0,
+        founderAdvances: 0,
         paymentCount: 0,
         expenseCount: 0
       }));
@@ -1196,6 +1269,8 @@ const TOKEN_KEY = "pp_token_v1";
         if (row.kind === "income") {
           target.income += num(row.record.amount);
           target.paymentCount++;
+        } else if (row.kind === "founder") {
+          target.founderAdvances += num(row.record.amount);
         } else {
           target.expenses += num(row.record.amount);
           target.expenseCount++;
@@ -1210,9 +1285,10 @@ const TOKEN_KEY = "pp_token_v1";
         .reduce((total, row) => ({
           income: total.income + row.income,
           expenses: total.expenses + row.expenses,
+          founderAdvances: total.founderAdvances + row.founderAdvances,
           paymentCount: total.paymentCount + row.paymentCount,
           expenseCount: total.expenseCount + row.expenseCount
-        }), { income: 0, expenses: 0, paymentCount: 0, expenseCount: 0 });
+        }), { income: 0, expenses: 0, founderAdvances: 0, paymentCount: 0, expenseCount: 0 });
     }
 
     function drawCompareChart(canvas, legend, rows) {
@@ -1295,12 +1371,13 @@ const TOKEN_KEY = "pp_token_v1";
         { title: "Umumiy daromad", value: fmt(totals.income), meta: periodName, cls: "income" },
         { title: "Umumiy xarajat", value: fmt(totals.expenses), meta: periodName, cls: "warn-kpi" },
         { title: "Sof foyda", value: fmt(net), meta: periodName, cls: net < 0 ? "danger-kpi" : "profit-kpi" },
-        { title: "Foyda marjasi", value: `${margin.toFixed(1)}%`, meta: `${totals.paymentCount} ta tushum`, cls: "cash" }
+        { title: "Foyda marjasi", value: `${margin.toFixed(1)}%`, meta: `${totals.paymentCount} ta tushum`, cls: "cash" },
+        { title: "Ta'sischi avanslari", value: fmt(totals.founderAdvances), meta: "Foydadan olingan, xarajatga kirmaydi", cls: "neutral-kpi" }
       ].map(item => `<div class="kpi card ${item.cls}"><div><h3>${item.title}</h3><div class="v">${item.value}</div></div><div class="meta">${item.meta}</div></div>`).join("");
       el.reportMonthsBody.innerHTML = months
         .filter(row => month === "all" || row.month.endsWith(`-${month}`))
-        .map(row => `<tr><td>${row.label}</td><td>${fmt(row.income)}</td><td>${fmt(row.expenses)}</td><td>${fmt(row.income - row.expenses)}</td><td>${row.paymentCount}</td><td>${row.expenseCount}</td></tr>`)
-        .join("") || `<tr><td colspan="6">Tanlangan davrda yozuv yo'q.</td></tr>`;
+        .map(row => `<tr><td>${row.label}</td><td>${fmt(row.income)}</td><td>${fmt(row.expenses)}</td><td>${fmt(row.income - row.expenses)}</td><td>${fmt(row.founderAdvances)}</td><td>${row.paymentCount}</td><td>${row.expenseCount}</td></tr>`)
+        .join("") || `<tr><td colspan="7">Tanlangan davrda yozuv yo'q.</td></tr>`;
       drawCompareChart(el.reportTrendChart, el.reportTrendLegend, months);
     }
 
@@ -1335,7 +1412,7 @@ const TOKEN_KEY = "pp_token_v1";
             const worker = state.finance.workers.find(item => item.id === record.workerId)?.name || record.workerName || "";
             const founder = state.finance.founders.find(item => item.id === record.founderId)?.name || record.founderName || "";
             lines.push([
-              record.date || row.month, row.month, "Xarajat", projectLabel, worker || founder,
+              record.date || row.month, row.month, row.kind === "founder" ? "Ta'sischi avansi (xarajat emas)" : "Xarajat", projectLabel, worker || founder,
               EXPENSE_LABEL[record.type] || record.type, num(record.amount), EXPENSE_PAYMENT_LABEL[record.paymentType] || record.paymentType || "",
               record.note || "", row.archived ? "Ha" : "Yo'q"
             ]);
@@ -1402,8 +1479,9 @@ const TOKEN_KEY = "pp_token_v1";
 
     function drawCharts() {
       const s = summary();
+      // Haqiqatda tushgan to'lovlar bo'yicha (zakaz summasi hali olinmagan pulni ham qo'shib yuborardi).
       const byType = {};
-      state.finance.projects.forEach((p) => { byType[p.paymentType] = (byType[p.paymentType] || 0) + num(p.amount); });
+      state.finance.payments.forEach((p) => { byType[p.paymentType] = (byType[p.paymentType] || 0) + num(p.amount); });
       drawDonut(el.paymentChart, el.paymentLegend, [
         { label: "Naqd", value: byType["Naqd"] || 0, color: "#0f7a56" },
         { label: "Karta", value: byType["Karta"] || 0, color: "#26a77a" },
@@ -1459,6 +1537,78 @@ const TOKEN_KEY = "pp_token_v1";
       }));
     }
 
+    // --- Yangiliklar ---
+    const esc = (text) => String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    const NEWS_ACTIONS = { added: { label: "Qo'shildi", cls: "s-done" }, changed: { label: "O'zgardi", cls: "s-progress" }, deleted: { label: "O'chirildi", cls: "s-over" } };
+    const NEWS_CATEGORIES = { projects: "Zakazlar", payments: "To'lovlar", expenses: "Xarajatlar", workers: "Ishchilar", founders: "Ta'sischilar", measurements: "O'lchovlar", designs: "Dizaynlar", settings: "Sozlamalar", archive: "Arxiv", users: "Foydalanuvchilar", system: "Tizim" };
+    const newsSeenKey = () => `pp_news_seen_${state.currentUser?.id || "anon"}`;
+    function newsSeen() {
+      try { return JSON.parse(localStorage.getItem(newsSeenKey()) || "{}") || {}; } catch { return {}; }
+    }
+    function newsLatest() {
+      return {
+        version: state.news.changelog[0]?.version || "",
+        at: state.news.activity.reduce((max, entry) => Math.max(max, Number(entry.at) || 0), 0)
+      };
+    }
+    function markNewsSeen() {
+      try { localStorage.setItem(newsSeenKey(), JSON.stringify(newsLatest())); } catch {}
+      updateNewsBadge();
+    }
+    function updateNewsBadge() {
+      const badge = document.getElementById("newsBadge");
+      if (!badge) return;
+      const seen = newsSeen();
+      const releases = state.news.changelog.filter(entry => !seen.version || entry.version > seen.version).length;
+      const changes = state.news.activity.filter(entry => (Number(entry.at) || 0) > (Number(seen.at) || 0) && entry.userId !== state.currentUser?.id).length;
+      const count = releases + changes;
+      badge.textContent = count > 99 ? "99+" : String(count);
+      badge.classList.toggle("hidden", !count || el.appSection.dataset.page === "news");
+    }
+    function renderNews() {
+      if (!el.newsChangelog || !el.newsActivity) return;
+      const seen = newsSeen();
+      el.newsChangelog.innerHTML = state.news.changelog.length ? state.news.changelog.map(entry => `
+        <article class="news-release">
+          <div class="news-release-head">
+            <strong>${esc(entry.title)}</strong>
+            <span class="news-date">${esc(entry.date)}</span>
+            ${!seen.version || entry.version > seen.version ? '<span class="pill s-new">Yangi</span>' : ""}
+          </div>
+          <ul class="tight">${(entry.items || []).map(item => `<li>${esc(item)}</li>`).join("")}</ul>
+        </article>`).join("") : '<p class="section-help">Hozircha yangilanish yo\'q.</p>';
+      if (el.newsFilter) {
+        const selected = el.newsFilter.value || "all";
+        const present = [...new Set(state.news.activity.map(entry => entry.category))].filter(key => NEWS_CATEGORIES[key]);
+        el.newsFilter.innerHTML = '<option value="all">Barcha bo\'limlar</option>' + present.map(key => `<option value="${esc(key)}">${esc(NEWS_CATEGORIES[key])}</option>`).join("");
+        el.newsFilter.value = present.includes(selected) ? selected : "all";
+      }
+      const filter = el.newsFilter?.value || "all";
+      const rows = state.news.activity.filter(entry => filter === "all" || entry.category === filter);
+      el.newsActivity.innerHTML = rows.length ? rows.map(entry => {
+        const action = NEWS_ACTIONS[entry.action] || NEWS_ACTIONS.changed;
+        const when = new Date(Number(entry.at) || 0).toLocaleString("uz-UZ", { timeZone: "Asia/Tashkent", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+        const fresh = (Number(entry.at) || 0) > (Number(seen.at) || 0) && entry.userId !== state.currentUser?.id;
+        return `<li class="news-item${fresh ? " is-fresh" : ""}">
+          <div class="news-item-head"><span class="pill ${action.cls}">${action.label}</span><strong>${esc(NEWS_CATEGORIES[entry.category] || entry.category)}</strong></div>
+          <div class="news-text">${esc(entry.text)}</div>
+          <div class="news-meta">${esc(when)} · ${esc(entry.username)}</div>
+        </li>`;
+      }).join("") : '<li class="news-empty">Hozircha o\'zgarish qayd etilmagan.</li>';
+    }
+    async function loadNews() {
+      if (!state.currentUser || isClientUser()) return;
+      try {
+        const data = await apiRequest("/api/news");
+        state.news = { changelog: Array.isArray(data.changelog) ? data.changelog : [], activity: Array.isArray(data.activity) ? data.activity : [] };
+        if (el.newsMsg) msg(el.newsMsg, "", "");
+      } catch (err) {
+        if (el.newsMsg) msg(el.newsMsg, err.message || "Yangiliklarni yuklab bo'lmadi.", "err");
+      }
+      renderNews();
+      updateNewsBadge();
+    }
+
     function refreshAll() {
       fillExpenseRelatedSelects();
       fillPaymentProjectSelect();
@@ -1477,6 +1627,8 @@ const TOKEN_KEY = "pp_token_v1";
       renderReports();
       renderUsersTable();
       renderPaymentLock();
+      renderNews();
+      updateNewsBadge();
       drawCharts();
       el.sTax.value = String(state.finance.settings.tax || "");
       el.sReserve.value = String(state.finance.settings.reserve || "");
@@ -1523,14 +1675,14 @@ const TOKEN_KEY = "pp_token_v1";
     function logout() {
       localStorage.removeItem(TOKEN_KEY);
       state.currentUser = null;
+      state.financeLoaded = false;
+      state.news = { changelog: [], activity: [] };
       el.appSection.classList.add("hidden");
       setSidebar(false);
       el.authSection.classList.remove("hidden");
       el.loginForm.reset();
       msg(el.loginMsg, "", "");
       showAuthMode();
-      // Sign out from Firebase
-      auth.signOut().catch(console.error);
     }
     function showAuthMode() {
       el.setupBox.classList.toggle("hidden", !needsSetup);
@@ -1585,19 +1737,6 @@ const TOKEN_KEY = "pp_token_v1";
         }
       });
 
-      // Sign in with Google (client-side Firebase) then exchange idToken with server
-      if (el.googleBtn) el.googleBtn.addEventListener('click', async () => {
-        try {
-          const provider = new firebase.auth.GoogleAuthProvider();
-          const result = await auth.signInWithPopup(provider);
-          const idToken = await result.user.getIdToken();
-          const data = await exchangeGoogleIdToken(idToken);
-          localStorage.setItem(TOKEN_KEY, data.token);
-          await bootSession();
-        } catch (err) {
-          msg(el.loginMsg, err.message || String(err), 'err');
-        }
-      });
     }
 
     function wireCore() {
@@ -1668,12 +1807,8 @@ const TOKEN_KEY = "pp_token_v1";
             approvedBy: state.currentUser.username,
             sent: false
           };
-          state.finance.designs.push(design);
-          if (!await saveFinance()) {
-            state.finance.designs = state.finance.designs.filter(item => item.id !== design.id);
-            throw new Error("Dizayn yuklandi, ammo platformaga saqlab bo'lmadi. Qayta urinib ko'ring.");
-          }
-          renderDesigns();
+          const saved = await commitFinance(f => { f.designs.push(design); }, el.designMsg);
+          if (!saved) return;
           await deliverDesign(design);
           el.designForm.reset();
           msg(el.designMsg, "Tasdiqlangan dizayn, o‘lcham va vazifa ruxsat berilgan foydalanuvchilarga yuborildi.", "ok");
@@ -1706,16 +1841,11 @@ const TOKEN_KEY = "pp_token_v1";
             photoFileId,
             createdAt: new Date().toISOString()
           };
-          state.finance.measurements.push(visit);
-          if (!await saveFinance()) {
-            state.finance.measurements = state.finance.measurements.filter(item => item.id !== visit.id);
-            throw new Error("Rasm yuklandi, ammo qayd platformaga saqlanmadi. Qayta urinib ko'ring.");
-          }
-          el.measurementForm.reset();
-          el.measurementDate.value = today();
-          el.measurementWorker.value = state.currentUser.username;
-          renderMeasurements();
-          msg(el.measurementMsg, "Joyga chiqish va o'lchovlar saqlandi.", "ok");
+          await commitFinance(f => { f.measurements.push(visit); }, el.measurementMsg, "Joyga chiqish va o'lchovlar saqlandi.", () => {
+            el.measurementForm.reset();
+            el.measurementDate.value = today();
+            el.measurementWorker.value = state.currentUser.username;
+          });
         } catch (err) {
           msg(el.measurementMsg, err.message || "O'lchovlarni saqlashda xatolik.", "err");
         } finally {
@@ -1756,6 +1886,8 @@ const TOKEN_KEY = "pp_token_v1";
           msg(el.announcementMsg, err.message || "E'lon yuborilmadi.", "err");
         }
       });
+      el.newsFilter.addEventListener("change", renderNews);
+      el.newsRefresh.addEventListener("click", () => loadNews().then(markNewsSeen));
       el.eType.addEventListener("change", toggleExpenseTypeInputs);
       el.dashboardYear.addEventListener("change", renderDashboardPeriod);
       el.dashboardMonth.addEventListener("change", renderDashboardPeriod);
@@ -1788,15 +1920,7 @@ const TOKEN_KEY = "pp_token_v1";
           try {
             const data = await apiRequest("/api/payment/mark-paid", { method: "POST", body: JSON.stringify({}) });
             if (data.finance) {
-              const saved = data.finance;
-              state.finance.projects = Array.isArray(saved.projects) ? saved.projects : [];
-              state.finance.payments = Array.isArray(saved.payments) ? saved.payments : [];
-              state.finance.workers = Array.isArray(saved.workers) ? saved.workers : [];
-              state.finance.founders = Array.isArray(saved.founders) ? saved.founders : [];
-              state.finance.expenses = Array.isArray(saved.expenses) ? saved.expenses : [];
-              state.finance.archives = Array.isArray(saved.archives) ? saved.archives : [];
-              state.finance.payment = saved.payment || { locked: false };
-              state.finance.settings = { tax: num(saved.settings?.tax), reserve: num(saved.settings?.reserve), other: num(saved.settings?.other) };
+              applyFinanceSnapshot(data.finance, data.revision);
             } else {
               await loadFinance();
             }
@@ -1811,100 +1935,104 @@ const TOKEN_KEY = "pp_token_v1";
       el.projectForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         if (blockIfPaymentLocked(el.projectMsg)) return;
-        const existingProject = editState.projectId
-          ? state.finance.projects.find(project => project.id === editState.projectId)
-          : null;
+        const editingId = editState.projectId;
+        const amount = parseMoney(el.pAmount.value);
+        const advance = editingId ? 0 : (String(el.pAdvance.value).trim() ? parseMoney(el.pAdvance.value) : 0);
+        if (!Number.isFinite(amount) || !Number.isFinite(advance)) return msg(el.projectMsg, "Summani faqat raqam bilan kiriting, masalan: 1 500 000.", "err");
         const rec = {
-          id: editState.projectId || uid(),
+          id: editingId || uid(),
           name: clean(el.pName.value), client: clean(el.pClient.value), clientLogin: clean(el.pClientLogin.value).toLowerCase(),
           startDate: el.pStart.value, dueDate: el.pDue.value,
-          amount: num(el.pAmount.value), advance: existingProject ? num(existingProject.advance) : num(el.pAdvance.value),
-          paymentType: clean(el.pType.value), status: clean(el.pStatus.value)
+          amount, paymentType: clean(el.pType.value), status: clean(el.pStatus.value)
         };
         if (!rec.name || !rec.client || !rec.startDate || !rec.dueDate) return msg(el.projectMsg, "Majburiy maydonlarni to'ldiring.", "err");
         if (rec.dueDate < rec.startDate) return msg(el.projectMsg, "Topshirish muddati oldin bo'lishi mumkin emas.", "err");
-        if (rec.amount <= 0 || rec.advance < 0 || rec.advance > rec.amount) return msg(el.projectMsg, "Summa/advance noto'g'ri.", "err");
-        const previousProjects = state.finance.projects;
-        const previousPayments = state.finance.payments;
-        if (editState.projectId) state.finance.projects = state.finance.projects.map(p => p.id === rec.id ? rec : p);
-        else {
-          state.finance.projects = [rec, ...state.finance.projects];
-          if (rec.advance > 0) state.finance.payments = [{
-            id: uid(), projectId: rec.id, projectName: rec.name, clientName: rec.client,
-            date: rec.startDate, amount: rec.advance, paymentType: rec.paymentType,
-            note: "Zakaz ochilgandagi oldindan to'lov"
-          }, ...state.finance.payments];
-        }
-        if (!await saveFinance()) {
-          state.finance.projects = previousProjects;
-          state.finance.payments = previousPayments;
-          return msg(el.projectMsg, "Loyihani saqlashda xatolik yuz berdi.", "err");
-        }
-        resetProjectForm(); msg(el.projectMsg, "Loyiha saqlandi.", "ok"); refreshAll();
+        if (rec.amount <= 0 || advance < 0 || advance > rec.amount) return msg(el.projectMsg, "Summa noto'g'ri yoki oldindan to'lov zakaz summasidan katta.", "err");
+        await commitFinance(f => {
+          if (editingId) {
+            const index = f.projects.findIndex(p => p.id === editingId);
+            if (index < 0) return "Zakaz topilmadi: boshqa foydalanuvchi o'chirgan bo'lishi mumkin.";
+            // To'langan summa faqat to'lovlar orqali o'zgaradi; zakazning boshqa maydonlari (ko'chgan oy, mijoz ID) saqlanadi.
+            const paid = num(f.projects[index].advance);
+            if (rec.amount < paid) return `Zakaz summasi allaqachon to'langan ${fmt(paid)} dan kam bo'lishi mumkin emas.`;
+            f.projects[index] = { ...f.projects[index], ...rec, advance: paid };
+          } else {
+            f.projects.unshift({ ...rec, advance });
+            if (advance > 0) f.payments.unshift({
+              id: uid(), projectId: rec.id, projectName: rec.name, clientName: rec.client,
+              date: rec.startDate <= today() ? rec.startDate : today(), amount: advance, paymentType: rec.paymentType,
+              note: "Zakaz ochilgandagi oldindan to'lov"
+            });
+          }
+        }, el.projectMsg, "Loyiha saqlandi.", resetProjectForm);
       });
       el.projectCancelEdit.addEventListener("click", resetProjectForm);
       el.projectReset.addEventListener("click", resetProjectForm);
 
       document.getElementById("paymentMax").addEventListener("click", () => {
         const project = state.finance.projects.find(p => p.id === el.paymentProjectId.value);
-        el.paymentAmount.value = project ? Math.max(num(project.amount) - num(project.advance), 0) : "";
+        el.paymentAmount.value = project ? String(roundMoney(Math.max(num(project.amount) - num(project.advance), 0))) : "";
         msg(el.paymentMsg, "Qolgan summa kiritildi. To'lovni saqlash tugmasini bosing.", "ok");
       });
       el.paymentProjectId.addEventListener("change", () => { el.paymentAmount.value = ""; });
       el.paymentForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         if (blockIfPaymentLocked(el.paymentMsg)) return;
-        const project = state.finance.projects.find(item => item.id === el.paymentProjectId.value);
-        const amount = num(el.paymentAmount.value);
-        if (!project) return msg(el.paymentMsg, "Zakazni tanlang.", "err");
-        if (amount <= 0 || amount > Math.max(num(project.amount) - num(project.advance), 0)) {
-          return msg(el.paymentMsg, "To'lov summasi 0 dan katta va zakaz qarzidan oshmasligi kerak.", "err");
-        }
-        const payment = {
-          id: uid(), projectId: project.id, projectName: project.name, clientName: project.client,
-          date: el.paymentDate.value || today(), amount, paymentType: clean(el.paymentType.value),
-          note: clean(el.paymentNote.value)
-        };
-        project.advance = num(project.advance) + amount;
-        state.finance.payments.unshift(payment);
-        const saved = await saveFinance();
-        if (!saved) {
-          project.advance -= amount;
-          state.finance.payments = state.finance.payments.filter(item => item.id !== payment.id);
-          return msg(el.paymentMsg, "To'lovni saqlashda xatolik yuz berdi.", "err");
-        }
-        el.paymentForm.reset();
-        el.paymentDate.value = today();
-        msg(el.paymentMsg, "To'lov saqlandi.", "ok");
-        refreshAll();
+        const projectId = el.paymentProjectId.value;
+        const amount = parseMoney(el.paymentAmount.value);
+        if (!state.finance.projects.some(item => item.id === projectId)) return msg(el.paymentMsg, "Zakazni tanlang.", "err");
+        if (!Number.isFinite(amount) || amount <= 0) return msg(el.paymentMsg, "To'lov summasini raqam bilan kiriting, masalan: 500 000.", "err");
+        await commitFinance(f => {
+          const project = f.projects.find(item => item.id === projectId);
+          if (!project) return "Zakaz topilmadi.";
+          const due = roundMoney(Math.max(num(project.amount) - num(project.advance), 0));
+          if (amount > due + 0.001) return `To'lov zakaz qarzidan (${fmt(due)}) oshmasligi kerak.`;
+          project.advance = roundMoney(num(project.advance) + amount);
+          f.payments.unshift({
+            id: uid(), projectId: project.id, projectName: project.name, clientName: project.client,
+            date: el.paymentDate.value || today(), amount, paymentType: clean(el.paymentType.value),
+            note: clean(el.paymentNote.value)
+          });
+        }, el.paymentMsg, "To'lov saqlandi.", () => {
+          el.paymentForm.reset();
+          el.paymentDate.value = today();
+        });
       });
 
       el.workerForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         if (blockIfPaymentLocked(el.workerMsg)) return;
-        const rec = { id: editState.workerId || uid(), phone: document.getElementById("wPhone").value.replace(/\D/g, ""), name: clean(el.wName.value), role: clean(el.wRole.value), salary: num(el.wSalary.value) };
-        if (!rec.name || !rec.role || rec.salary <= 0) return msg(el.workerMsg, "Ma'lumotlarni to'g'ri kiriting.", "err");
-        const previousWorkers = [...state.finance.workers];
+        const editingId = editState.workerId;
+        const rec = { id: editingId || uid(), phone: document.getElementById("wPhone").value.replace(/\D/g, ""), name: clean(el.wName.value), role: clean(el.wRole.value), salary: parseMoney(el.wSalary.value) };
+        if (!rec.name || !rec.role || !Number.isFinite(rec.salary) || rec.salary <= 0) return msg(el.workerMsg, "Ism, lavozim va oylikni to'g'ri kiriting (masalan: 3 000 000).", "err");
         const phoneKey = value => { const digits = String(value || "").replace(/\D/g, ""); return digits.length === 9 ? `998${digits}` : digits; };
-        if (rec.phone && (!/^\d{9,15}$/.test(rec.phone) || previousWorkers.some(w => w.id !== rec.id && phoneKey(w.phone) === phoneKey(rec.phone)))) return msg(el.workerMsg, "Telefon noto'g'ri yoki boshqa xodimda ishlatilgan.", "err");
-        if (editState.workerId) state.finance.workers = state.finance.workers.map(w => w.id === rec.id ? rec : w);
-        else state.finance.workers.unshift(rec);
-        if (!await saveFinance()) { state.finance.workers = previousWorkers; return msg(el.workerMsg, "Xodim saqlanmadi. Qayta urinib ko'ring.", "err"); }
-        resetWorkerForm(); msg(el.workerMsg, "Ishchi saqlandi.", "ok"); refreshAll();
+        if (rec.phone && (!/^\d{9,15}$/.test(rec.phone) || state.finance.workers.some(w => w.id !== rec.id && phoneKey(w.phone) === phoneKey(rec.phone)))) return msg(el.workerMsg, "Telefon noto'g'ri yoki boshqa xodimda ishlatilgan.", "err");
+        await commitFinance(f => {
+          if (editingId) {
+            const index = f.workers.findIndex(w => w.id === editingId);
+            if (index < 0) return "Ishchi topilmadi.";
+            f.workers[index] = { ...f.workers[index], ...rec };
+          } else f.workers.unshift(rec);
+        }, el.workerMsg, "Ishchi saqlandi.", resetWorkerForm);
       });
       el.workerCancelEdit.addEventListener("click", resetWorkerForm);
       el.workerReset.addEventListener("click", () => { el.workerForm.reset(); msg(el.workerMsg, "", ""); });
 
-      el.founderForm.addEventListener("submit", (e) => {
+      el.founderForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         if (blockIfPaymentLocked(el.founderMsg)) return;
-        const rec = { id: editState.founderId || uid(), name: clean(el.fName.value), share: num(el.fShare.value), note: clean(el.fNote.value) };
-        if (!rec.name || rec.share <= 0) return msg(el.founderMsg, "Ism va foizni to'g'ri kiriting.", "err");
-        const totalWithout = state.finance.founders.filter(f => f.id !== rec.id).reduce((a, f) => a + num(f.share), 0);
-        if (totalWithout + rec.share > 100) return msg(el.founderMsg, "Jami foiz 100% dan oshib ketadi.", "err");
-        if (editState.founderId) state.finance.founders = state.finance.founders.map(f => f.id === rec.id ? rec : f);
-        else state.finance.founders.push(rec);
-        saveFinance(); resetFounderForm(); msg(el.founderMsg, "Ta'sischi saqlandi.", "ok"); refreshAll();
+        const editingId = editState.founderId;
+        const rec = { id: editingId || uid(), name: clean(el.fName.value), share: parsePercent(el.fShare.value), note: clean(el.fNote.value) };
+        if (!rec.name || !Number.isFinite(rec.share) || rec.share <= 0 || rec.share > 100) return msg(el.founderMsg, "Ism va foizni to'g'ri kiriting (0 dan 100 gacha).", "err");
+        await commitFinance(f => {
+          const totalWithout = f.founders.filter(x => x.id !== rec.id).reduce((a, x) => a + num(x.share), 0);
+          if (totalWithout + rec.share > 100.0001) return `Jami foiz 100% dan oshib ketadi (boshqalar: ${totalWithout.toFixed(2)}%).`;
+          if (editingId) {
+            const index = f.founders.findIndex(x => x.id === editingId);
+            if (index < 0) return "Ta'sischi topilmadi.";
+            f.founders[index] = { ...f.founders[index], ...rec };
+          } else f.founders.push(rec);
+        }, el.founderMsg, "Ta'sischi saqlandi.", resetFounderForm);
       });
       el.founderCancelEdit.addEventListener("click", resetFounderForm);
       el.founderReset.addEventListener("click", () => { el.founderForm.reset(); msg(el.founderMsg, "", ""); });
@@ -1913,22 +2041,25 @@ const TOKEN_KEY = "pp_token_v1";
         e.preventDefault();
         if (blockIfPaymentLocked(el.expenseMsg)) return;
         const existingExpense = editState.expenseId ? state.finance.expenses.find(x => x.id === editState.expenseId) : null;
+        const expenseAmount = parseMoney(el.eAmount.value);
+        if (!Number.isFinite(expenseAmount) || expenseAmount <= 0) return msg(el.expenseMsg, "Xarajat summasini raqam bilan kiriting, masalan: 250 000.", "err");
         const allocations = readExpenseAllocations();
+        if (allocations.some(allocation => !Number.isFinite(allocation.amount))) return msg(el.expenseMsg, "Zakazga ajratilgan summani raqam bilan kiriting.", "err");
         const uniqueProjectIds = new Set(allocations.map(allocation => allocation.projectId));
-        const allocationTotal = allocations.reduce((sum, allocation) => sum + allocation.amount, 0);
+        const allocationTotal = roundMoney(allocations.reduce((sum, allocation) => sum + allocation.amount, 0));
         const invalidProject = allocations.some(allocation =>
           !state.finance.projects.some(project => project.id === allocation.projectId) &&
           !expenseAllocations(existingExpense || {}).some(previous => previous.projectId === allocation.projectId)
         );
         if (!allocations.length || invalidProject || allocations.some(allocation => !allocation.projectId || allocation.amount <= 0) ||
-            uniqueProjectIds.size !== allocations.length || Math.abs(allocationTotal - num(el.eAmount.value)) >= 0.01) {
+            uniqueProjectIds.size !== allocations.length || Math.abs(allocationTotal - expenseAmount) >= 0.01) {
           return msg(el.expenseMsg, "Xarajat summasini takrorlanmagan zakazlarga to'liq taqsimlang.", "err");
         }
         const rec = {
           id: editState.expenseId || uid(),
           date: el.eDate.value || today(),
           type: clean(el.eType.value),
-          amount: num(el.eAmount.value),
+          amount: expenseAmount,
           paymentType: clean(el.ePaymentType.value),
           note: clean(el.eNote.value),
           workerId: null,
@@ -1948,21 +2079,20 @@ const TOKEN_KEY = "pp_token_v1";
           const salaryPaid = workerSalaryPaidById()[worker.id] || 0;
           const advanceAfterSave = advanceTotal - (existingExpense?.type === "oylik_avans" ? oldAmount : 0) + (rec.type === "oylik_avans" ? rec.amount : 0);
           const paidAfterSave = salaryPaid - (existingExpense?.type === "oylik_tolov" ? oldAmount : 0) + (rec.type === "oylik_tolov" ? rec.amount : 0);
-          if (advanceAfterSave + paidAfterSave > num(worker.salary)) return msg(el.expenseMsg, "Oylik avansi va to'lovlari ishchi oyligidan oshib ketmoqda.", "err");
+          if (advanceAfterSave + paidAfterSave > num(worker.salary) + 0.001) return msg(el.expenseMsg, "Oylik avansi va to'lovlari ishchi oyligidan oshib ketmoqda.", "err");
         }
         if (rec.type === "founder_avans") {
           rec.founderId = el.eFounderId.value;
           if (!rec.founderId) return msg(el.expenseMsg, "Ta'sischini tanlang.", "err");
           rec.founderName = state.finance.founders.find(founder => founder.id === rec.founderId)?.name || "";
         }
-        const previousExpenses = state.finance.expenses;
-        if (editState.expenseId) state.finance.expenses = state.finance.expenses.map(x => x.id === rec.id ? rec : x);
-        else state.finance.expenses = [rec, ...state.finance.expenses];
-        if (!await saveFinance()) {
-          state.finance.expenses = previousExpenses;
-          return msg(el.expenseMsg, "Xarajatni saqlashda xatolik yuz berdi.", "err");
-        }
-        resetExpenseForm(); msg(el.expenseMsg, "Xarajat saqlandi.", "ok"); refreshAll();
+        await commitFinance(f => {
+          if (existingExpense) {
+            const index = f.expenses.findIndex(x => x.id === rec.id);
+            if (index < 0) return "Xarajat topilmadi: boshqa foydalanuvchi o'chirgan bo'lishi mumkin.";
+            f.expenses[index] = rec;
+          } else f.expenses.unshift(rec);
+        }, el.expenseMsg, "Xarajat saqlandi.", resetExpenseForm);
       });
       el.expenseCancelEdit.addEventListener("click", resetExpenseForm);
       el.expenseReset.addEventListener("click", () => {
@@ -2005,17 +2135,19 @@ const TOKEN_KEY = "pp_token_v1";
 
       el.saveSettings.addEventListener("click", () => {
         if (blockIfPaymentLocked(el.settingsMsg)) return;
-        const tax = num(el.sTax.value), reserve = num(el.sReserve.value), other = num(el.sOther.value);
-        if (tax < 0 || reserve < 0 || other < 0 || tax > 100 || reserve > 100) return msg(el.settingsMsg, "Qiymatlar noto'g'ri.", "err");
-        state.finance.settings = { tax, reserve, other };
-        saveFinance(); msg(el.settingsMsg, "Sozlamalar saqlandi.", "ok"); refreshAll();
+        const tax = parsePercent(el.sTax.value), reserve = parsePercent(el.sReserve.value);
+        const other = String(el.sOther.value).trim() ? parseMoney(el.sOther.value) : 0;
+        if (![tax, reserve, other].every(Number.isFinite) || tax > 100 || reserve > 100) return msg(el.settingsMsg, "Qiymatlar noto'g'ri: foizlar 0–100, summa raqam bo'lsin.", "err");
+        commitFinance(f => { f.settings = { tax, reserve, other }; }, el.settingsMsg, "Sozlamalar saqlandi.");
       });
       el.clearData.addEventListener("click", () => {
         if (!isSuperAdmin()) return msg(el.settingsMsg, "Barcha ma'lumotni tozalash faqat super admin uchun.", "err");
         if (!confirm("Barcha loyiha/ishchi/ta'sischi/xarajat ma'lumotlarini tozalaysizmi?")) return;
-        state.finance = { projects: [], payments: [], workers: [], founders: [], expenses: [], archives: state.finance.archives || [], measurements: [], designs: [], payment: state.finance.payment || { locked: false }, settings: { tax: 0, reserve: 0, other: 0 } };
-        saveFinance(); resetProjectForm(); resetWorkerForm(); resetFounderForm(); resetExpenseForm();
-        msg(el.settingsMsg, "Barcha ma'lumotlar 0 qilindi.", "warn"); refreshAll();
+        commitFinance(f => {
+          Object.assign(f, { projects: [], payments: [], workers: [], founders: [], expenses: [], measurements: [], designs: [], settings: { tax: 0, reserve: 0, other: 0 } });
+        }, el.settingsMsg, "Barcha joriy ma'lumotlar 0 qilindi (arxiv saqlandi).", () => {
+          resetProjectForm(); resetWorkerForm(); resetFounderForm(); resetExpenseForm();
+        });
       });
     }
 
@@ -2039,6 +2171,8 @@ const TOKEN_KEY = "pp_token_v1";
         if (state.currentUser?.role === "super_admin") await loadUsers();
         await loadFinance();
         refreshAll();
+        await loadNews();
+        if (el.appSection.dataset.page === "news") markNewsSeen();
       } catch (err) {
         console.error("Session data load error:", err);
       }
@@ -2060,9 +2194,12 @@ const TOKEN_KEY = "pp_token_v1";
         try {
           const data = await apiRequest("/api/finance");
           if (data.finance?.payment) {
-            if (state.finance.payment?.currentMonth && state.finance.payment.currentMonth !== data.finance.payment.currentMonth) {
-              applyFinanceSnapshot(data.finance);
+            // Boshqa foydalanuvchi saqlagan bo'lsa (yoki oy almashgan bo'lsa) yangi ma'lumot ko'rsatiladi.
+            if (!saving && (!state.financeLoaded || Number(data.revision) !== state.revision)) {
+              applyFinanceSnapshot(data.finance, data.revision);
+              setLoadError("");
               refreshAll();
+              loadNews();
               return;
             }
             state.finance.payment = data.finance.payment;

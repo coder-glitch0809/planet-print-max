@@ -905,3 +905,51 @@ textarea:focus { outline: 2px solid color-mix(in srgb, var(--brand) 30%, transpa
 .amount-with-max input { min-width: 0; flex: 1; }
 .amount-with-max button { flex-shrink: 0; }
 .worker-notifications .checkline { margin: 4px 0; }
+
+#appSection[data-page="news"] { --page-accent: #e07a1f; }
+.tab[data-page="news"] { --tab-accent: #e07a1f; }
+.tab { position: relative; }
+.tab-badge {
+  display: inline-block;
+  min-width: 20px;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e5484d;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.news-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.news-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 14px; margin-top: 10px; }
+.news-col { margin-bottom: 0; }
+.news-col-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.news-col-head select { width: auto; min-width: 170px; }
+.news-feed { list-style: none; margin: 0; padding: 0; max-height: 640px; overflow-y: auto; }
+.news-item { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; background: var(--panel); }
+.news-item.is-fresh { border-left: 3px solid #e07a1f; background: color-mix(in srgb, #e07a1f 6%, var(--panel)); }
+.news-item-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.news-text { font-size: 13px; overflow-wrap: anywhere; }
+.news-meta { margin-top: 4px; font-size: 12px; color: var(--muted); }
+.news-empty { color: var(--muted); padding: 10px 0; }
+.news-release { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.news-release:last-child { border-bottom: 0; }
+.news-release-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.news-date { font-size: 12px; color: var(--muted); }
+.load-error {
+  margin: 14px 24px 0;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 10%, var(--panel));
+  color: var(--text);
+  font-weight: 600;
+}
+@media (max-width: 900px) {
+  .news-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 740px) {
+  .load-error { margin: 10px 14px 0; }
+}

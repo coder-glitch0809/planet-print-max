@@ -6,9 +6,6 @@
   <title>Planet Print | Boshqaruv paneli</title>
   <link rel="icon" type="image/jpeg" href="assets/photo_2025-01-30_14-49-44.jpg" />
   <link rel="apple-touch-icon" href="assets/photo_2025-01-30_14-49-44.jpg" />
-  <!-- Firebase SDK -->
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -40,9 +37,9 @@
       <div id="loginBox" class="auth-card card login-card">
         <span class="secure-pill">Secure workspace</span>
         <h3>Kirish</h3>
-        <p class="sub auth-copy">Tizimga kirish uchun ma'lumotlaringizni kiriting</p>
+        <p class="sub auth-copy">Telefon raqamingiz va parolingiz bilan kiring. Login yoki email ham ishlaydi.</p>
         <form id="loginForm" class="form-grid">
-          <div class="floating-field"><input id="loginUser" maxlength="128" placeholder=" " autocomplete="username" required /><label for="loginUser">Login yoki email</label></div>
+          <div class="floating-field"><input id="loginUser" maxlength="128" placeholder=" " autocomplete="username" required /><label for="loginUser">Telefon, login yoki email</label></div>
           <div class="floating-field"><input id="loginPass" type="password" maxlength="64" placeholder=" " autocomplete="current-password" required /><label for="loginPass">Parol</label></div>
           <label class="checkline"><input id="loginShow" type="checkbox" /> Parolni ko'rsatish</label>
           <button id="loginBtn" class="login-button" type="submit"><span>Kirish</span></button>
@@ -95,7 +92,34 @@
             <button id="logoutBtn" class="danger" type="button">Chiqish</button>
           </div>
         </div>
+      <div id="loadError" class="load-error hidden" role="alert"></div>
       <main class="content">
+
+      <section id="news" class="page">
+        <div class="panel card">
+          <div class="section-heading news-heading">
+            <div>
+              <h2 class="section-title">Yangiliklar</h2>
+              <p class="section-help">Dasturga kiritilgan yangilanishlar va platformadagi so'nggi o'zgarishlar: kim, qachon, nimani qo'shdi, o'zgartirdi yoki o'chirdi. Siz faqat ruxsatingiz bor bo'limlar o'zgarishlarini ko'rasiz.</p>
+            </div>
+            <button id="newsRefresh" class="ghost small-btn" type="button">Yangilash</button>
+          </div>
+          <div id="newsMsg" class="msg" role="status" aria-live="polite"></div>
+          <div class="news-grid">
+            <div class="card panel news-col">
+              <div class="news-col-head">
+                <h3 class="section-title" style="font-size:18px;">So'nggi o'zgarishlar</h3>
+                <select id="newsFilter" aria-label="Bo'lim bo'yicha saralash"><option value="all">Barcha bo'limlar</option></select>
+              </div>
+              <ul id="newsActivity" class="news-feed"></ul>
+            </div>
+            <div class="card panel news-col">
+              <h3 class="section-title" style="font-size:18px;">Dastur yangilanishlari</h3>
+              <div id="newsChangelog"></div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section id="dashboard" class="page active">
         <div class="panel" style="padding-left:0;padding-right:0;padding-top:0;">
@@ -385,7 +409,7 @@
 
       <section id="reports" class="page">
         <div class="panel card">
-          <div class="section-heading"><div><h2 class="section-title">Moliyaviy hisobotlar</h2><p class="section-help">Arxiv va joriy davrdagi tushumlar hamda barcha xarajatlar.</p></div></div>
+          <div class="section-heading"><div><h2 class="section-title">Moliyaviy hisobotlar</h2><p class="section-help">Arxiv va joriy davrdagi tushumlar hamda xarajatlar. Ta'sischi avansi foydani taqsimlash bo'lgani uchun xarajatga qo'shilmaydi, alohida ko'rsatiladi.</p></div></div>
           <div class="report-toolbar">
             <div><label for="reportYear">Yil</label><select id="reportYear"></select></div>
             <div><label for="reportMonth">Oy</label><select id="reportMonth"><option value="all">Yil bo'yicha</option></select></div>
@@ -399,7 +423,7 @@
           </div>
           <div class="table-wrap">
             <table class="expense-table">
-              <thead><tr><th>Oy</th><th>Daromad</th><th>Xarajat</th><th>Sof foyda</th><th>To'lovlar soni</th><th>Xarajatlar soni</th></tr></thead>
+              <thead><tr><th>Oy</th><th>Daromad</th><th>Xarajat</th><th>Sof foyda</th><th>Ta'sischi avansi</th><th>To'lovlar soni</th><th>Xarajatlar soni</th></tr></thead>
               <tbody id="reportMonthsBody"></tbody>
             </table>
           </div>
@@ -410,6 +434,7 @@
         <div class="panel card">
           <h2 class="section-title">Arxiv</h2>
           <p id="archiveSummary" class="section-help">Oylar bo'yicha barcha ishlar, tushumlar, xarajatlar va to'lanmagan zakazlar.</p>
+          <div id="archiveMsg" class="msg" role="status" aria-live="polite"></div>
           <div class="table-wrap">
             <table>
               <thead><tr><th>Oy</th><th>Loyiha</th><th>Mijoz</th><th>Summa</th><th>To'langan</th><th>Qarz</th><th>Holat</th><th>Amal</th></tr></thead>

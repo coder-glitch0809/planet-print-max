@@ -9,9 +9,27 @@ require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || "planet_print_change_me";
+
+// JWT kaliti hech qachon ochiq standart qiymat bo'lmasligi kerak: aks holda istalgan odam
+// super admin tokenini yasay oladi. JWT_SECRET berilmasa, service account kalitidan barqaror
+// maxfiy qiymat olinadi (Vercelning barcha instansiyalarida bir xil bo'ladi).
+function resolveJwtSecret() {
+  const configured = String(process.env.JWT_SECRET || "");
+  const placeholders = ["", "please_change_to_long_random_secret", "planet_print_change_me"];
+  if (!placeholders.includes(configured)) return configured;
+  let material = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || process.env.FIREBASE_SERVICE_ACCOUNT || "";
+  if (!material) {
+    try { material = fs.readFileSync(path.join(__dirname, "firebase-config.json"), "utf8"); } catch { material = ""; }
+  }
+  console.warn("JWT_SECRET sozlanmagan yoki standart qiymatda. Hosting muhitida kuchli JWT_SECRET kiriting.");
+  if (material) return crypto.createHash("sha256").update(`planet-print-jwt:${material}`).digest("hex");
+  return crypto.randomBytes(48).toString("hex");
+}
+const JWT_SECRET = resolveJwtSecret();
+// Zaxira super admin faqat SUPER_PASS muhit o'zgaruvchisi aniq berilganda ishlaydi.
 const FALLBACK_ADMIN_USER = process.env.SUPER_USER || "Superadmin";
-const FALLBACK_ADMIN_PASS = process.env.SUPER_PASS || "Planet2026";
+const FALLBACK_ADMIN_PASS = String(process.env.SUPER_PASS || "");
+const FALLBACK_ADMIN_ENABLED = FALLBACK_ADMIN_PASS.length >= 8;
 
 function clearDeadLocalProxy() {
   const proxyKeys = [
@@ -46,7 +64,10 @@ const memoryStore = global.__planetPrintMemoryStore || {
   users: [],
   finance: DEFAULT_FINANCE
 };
+if (!Number.isFinite(memoryStore.revision)) memoryStore.revision = 0;
+if (!Array.isArray(memoryStore.activity)) memoryStore.activity = [];
 global.__planetPrintMemoryStore = memoryStore;
+const CHANGELOG = require("./changelog");
 
 function withTimeout(promise, ms, message = "Request timeout") {
   let timer;
@@ -242,11 +263,14 @@ function archiveOpenCycle(finance) {
     });
   }
 
+  // Qarzi qolgan zakaz keyingi oyga asl summasi va to'langan qismi bilan o'tadi.
+  // carriedFromMonth belgisi bu zakaz daromadi avvalgi oyda hisoblanganini bildiradi,
+  // shuning uchun u yangi oyning ta'sischi fondi/soliq/zaxirasiga qayta qo'shilmaydi.
   next.projects = next.projects
     .map((project) => {
       const remaining = Math.max(Number(project.amount || 0) - Number(project.advance || 0), 0);
       return remaining > 0
-        ? { ...project, amount: remaining, advance: 0, carriedFromMonth: archivedMonth }
+        ? { ...project, carriedFromMonth: archivedMonth, originMonth: project.originMonth || archivedMonth }
         : null;
     })
     .filter(Boolean);
@@ -344,10 +368,28 @@ function visibleFinanceForUser(req, finance) {
   };
 }
 
+// Arxivni brauzer qayta yoza olmaydi: faqat super admin "Qarz yopildi" belgisini qo'ya oladi.
+function mergeArchiveDebtFlags(currentArchives, incomingArchives) {
+  const closed = new Map();
+  incomingArchives.forEach(archive => (Array.isArray(archive?.projects) ? archive.projects : []).forEach(project => {
+    if (project?.debtClosed === true) closed.set(`${archive.id}|${project.id}`, sanitizeText(project.debtClosedAt, 40) || new Date().toISOString());
+  }));
+  return currentArchives.map(archive => ({
+    ...archive,
+    projects: (Array.isArray(archive.projects) ? archive.projects : []).map(project => {
+      const key = `${archive.id}|${project.id}`;
+      return !project.debtClosed && closed.has(key) ? { ...project, debtClosed: true, debtClosedAt: closed.get(key) } : project;
+    })
+  }));
+}
+
 function mergeFinanceForUser(req, currentFinance, incomingFinance) {
   const current = normalizeFinance(currentFinance);
   const incoming = normalizeFinance(incomingFinance);
-  if (req.user?.role === "super_admin") return incoming;
+  if (req.user?.role === "super_admin") {
+    // To'lov holati va arxiv server tomonidan boshqariladi; eski sahifa ularni qaytarib yozmasin.
+    return { ...incoming, payment: current.payment, archives: mergeArchiveDebtFlags(current.archives, incoming.archives) };
+  }
   if (["client", "viewer"].includes(req.user?.role)) return current;
 
   const next = { ...current };
@@ -374,24 +416,182 @@ function mergeFinanceForUser(req, currentFinance, incomingFinance) {
   return next;
 }
 
+const FINANCE_COLLECTIONS = ["projects", "payments", "workers", "founders", "expenses", "measurements", "designs"];
+const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const isMoney = (value, allowZero = true) => {
+  const n = Number(value);
+  return value !== "" && value !== null && Number.isFinite(n) && (allowZero ? n >= 0 : n > 0);
+};
+
+function changedRows(currentRows, nextRows) {
+  const before = new Map(currentRows.map(row => [String(row.id), JSON.stringify(row)]));
+  return nextRows.filter(row => before.get(String(row.id)) !== JSON.stringify(row));
+}
+
 function validateFinanceChanges(current, next) {
+  for (const key of FINANCE_COLLECTIONS) {
+    const ids = next[key].map(row => String(row?.id ?? ""));
+    const changed = changedRows(current[key], next[key]);
+    // Identifikator HTML atributlariga tushadi: faqat xavfsiz belgilar qabul qilinadi.
+    if (changed.some(row => !row || typeof row !== "object" || !SAFE_ID.test(String(row.id ?? "")))) return "Yozuv identifikatori noto'g'ri.";
+    const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
+    if (changed.some(row => duplicates.includes(String(row.id)))) return "Yozuv identifikatori takrorlangan.";
+  }
   if (new Set(next.payments.map(p => p.id)).size !== next.payments.length) return "To'lov identifikatori takrorlangan.";
   const phones = next.workers.map(w => normalizePhone(w.phone)).filter(Boolean);
   if (new Set(phones).size !== phones.length) return "Xodim telefon raqami takrorlangan.";
   if (next.workers.some(w => w.phone && !/^\d{9,15}$/.test(normalizePhone(w.phone)))) return "Telefon raqami noto'g'ri.";
+  const paymentTotal = (rows, projectId) => rows.filter(p => p.projectId === projectId).reduce((sum, p) => sum + Number(p.amount), 0);
   for (const project of next.projects) {
-    if (!Number.isFinite(Number(project.amount)) || !Number.isFinite(Number(project.advance)) ||
-        Number(project.amount) < 0 || Number(project.advance) < 0 || Number(project.advance) > Number(project.amount)) return "Zakaz to'lov summasi noto'g'ri.";
+    if (!isMoney(project.amount) || !isMoney(project.advance) || Number(project.advance) > Number(project.amount) + 0.001) return "Zakaz to'lov summasi noto'g'ri.";
     const previous = current.projects.find(p => p.id === project.id);
     if (previous) {
-      const total = rows => rows.filter(p => p.projectId === project.id).reduce((sum, p) => sum + Number(p.amount), 0);
-      if (Math.abs((Number(project.advance) - Number(previous.advance)) - (total(next.payments) - total(current.payments))) > 0.01) return "Zakaz qoldig'i to'lov yozuvlariga mos emas.";
+      if (Math.abs((Number(project.advance) - Number(previous.advance)) - (paymentTotal(next.payments, project.id) - paymentTotal(current.payments, project.id))) > 0.01) return "Zakaz qoldig'i to'lov yozuvlariga mos emas.";
+    } else if (Math.abs(Number(project.advance) - paymentTotal(next.payments, project.id)) > 0.01) {
+      // Yangi zakazning oldindan olingan summasi albatta to'lov yozuvi bilan kelishi kerak.
+      return "Yangi zakazning oldindan to'lovi to'lov yozuviga mos emas.";
     }
   }
   for (const payment of next.payments) {
-    if (!Number.isFinite(Number(payment.amount)) || Number(payment.amount) <= 0) return "To'lov summasi noto'g'ri.";
+    if (!isMoney(payment.amount, false)) return "To'lov summasi noto'g'ri.";
+  }
+  for (const expense of changedRows(current.expenses, next.expenses)) {
+    if (!isMoney(expense.amount, false)) return "Xarajat summasi noto'g'ri.";
+  }
+  for (const worker of changedRows(current.workers, next.workers)) {
+    if (!isMoney(worker.salary)) return "Ishchi oyligi noto'g'ri.";
+  }
+  if (changedRows(current.founders, next.founders).length || current.founders.length !== next.founders.length) {
+    if (next.founders.some(f => !Number.isFinite(Number(f.share)) || Number(f.share) <= 0 || Number(f.share) > 100)) return "Ta'sischi foizi noto'g'ri.";
+    if (next.founders.reduce((sum, f) => sum + Number(f.share), 0) > 100.0001) return "Ta'sischilar foizi jami 100% dan oshmasligi kerak.";
+  }
+  if (JSON.stringify(current.settings) !== JSON.stringify(next.settings)) {
+    const { tax, reserve, other } = next.settings;
+    if (tax < 0 || tax > 100 || reserve < 0 || reserve > 100 || other < 0) return "Sozlamalar qiymati noto'g'ri.";
   }
   return "";
+}
+
+// --- Faoliyat jurnali ("Yangiliklar" bo'limi uchun) ---
+const ACTIVITY_SECTIONS = {
+  projects: { label: "Zakaz", perms: ["projects"] },
+  payments: { label: "To'lov", perms: ["payments"] },
+  expenses: { label: "Xarajat", perms: ["expenses"] },
+  workers: { label: "Ishchi", perms: ["workers"] },
+  founders: { label: "Ta'sischi", perms: ["founders"] },
+  measurements: { label: "O'lchov", perms: ["measurements"] },
+  designs: { label: "Dizayn", perms: ["designs", "projects"] },
+  settings: { label: "Sozlamalar", perms: ["settings"] },
+  archive: { label: "Arxiv", perms: ["dashboard", "projects", "expenses", "reports"] },
+  system: { label: "Tizim", perms: [] },
+  users: { label: "Foydalanuvchilar", perms: [] }
+};
+const EXPENSE_TYPE_LABEL = {
+  banner: "Banner", arakal: "Arakal", rezka: "Rezka", reyka: "Reyka", dostavka: "Dostavka", zapravka: "Zapravka",
+  suv: "Suv", boshqa: "Boshqa", oylik_avans: "Oylik maosh avansi", oylik_tolov: "Ishchi oyligi", founder_avans: "Ta'sischi avansi"
+};
+const moneyText = value => `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(Number(value) || 0).replace(/ /g, " ")} UZS`;
+
+// Jurnal matni ekranda escape qilinadi: apostroflar saqlanadi (sanitizeText ularni o'chirib yuborardi).
+function plainText(value, max = 120) {
+  return String(value ?? "").replace(/[\u0000-\u001f<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+function activityTitle(category, row) {
+  const t = value => plainText(value, 80);
+  if (category === "projects") return `${t(row.name)} — ${t(row.client)}, ${moneyText(row.amount)}`;
+  if (category === "payments") return `${t(row.projectName) || "Zakaz"}: ${moneyText(row.amount)}${row.paymentType ? ` (${t(row.paymentType)})` : ""}`;
+  if (category === "expenses") return `${EXPENSE_TYPE_LABEL[row.type] || t(row.type)}: ${moneyText(row.amount)}${row.workerName || row.founderName ? ` — ${t(row.workerName || row.founderName)}` : ""}`;
+  if (category === "workers") return `${t(row.name)} (${t(row.role)}), oylik ${moneyText(row.salary)}`;
+  if (category === "founders") return `${t(row.name)} — ${Number(row.share) || 0}%`;
+  if (category === "measurements") return `${t(row.client)} — ${t(row.address)}`;
+  if (category === "designs") return `${t(row.projectName) || "Dizayn"}${row.dimensions ? ` (${t(row.dimensions)})` : ""}${row.sent ? ", Telegramga yuborildi" : ""}`;
+  return "";
+}
+
+const PROJECT_FIELD_LABELS = { name: "nomi", client: "mijoz", amount: "summa", advance: "to'langan", status: "holat", dueDate: "topshirish", startDate: "olingan sana" };
+function projectChangeDetail(before, after) {
+  return Object.entries(PROJECT_FIELD_LABELS)
+    .filter(([field]) => String(before[field] ?? "") !== String(after[field] ?? ""))
+    .map(([field, label]) => {
+      const show = value => ["amount", "advance"].includes(field) ? moneyText(value) : plainText(value, 60) || "-";
+      return `${label}: ${show(before[field])} → ${show(after[field])}`;
+    }).join("; ");
+}
+
+function financeActivity(previousFinance, nextFinance) {
+  const previous = normalizeFinance(previousFinance);
+  const next = normalizeFinance(nextFinance);
+  const entries = [];
+  for (const category of FINANCE_COLLECTIONS) {
+    const before = new Map(previous[category].map(row => [String(row.id), row]));
+    const after = new Map(next[category].map(row => [String(row.id), row]));
+    for (const [id, row] of after) {
+      const old = before.get(id);
+      if (!old) entries.push({ category, action: "added", text: activityTitle(category, row) });
+      else if (JSON.stringify(old) !== JSON.stringify(row)) {
+        const detail = category === "projects" ? projectChangeDetail(old, row) : "";
+        entries.push({ category, action: "changed", text: activityTitle(category, row) + (detail ? ` | ${detail}` : "") });
+      }
+    }
+    for (const [id, row] of before) {
+      if (!after.has(id)) entries.push({ category, action: "deleted", text: activityTitle(category, row) });
+    }
+  }
+  if (JSON.stringify(previous.settings) !== JSON.stringify(next.settings)) {
+    entries.push({ category: "settings", action: "changed", text: `Soliq ${next.settings.tax}%, zaxira ${next.settings.reserve}%, qo'lda xarajat ${moneyText(next.settings.other)}` });
+  }
+  const closedBefore = new Set(previous.archives.flatMap(a => (a.projects || []).filter(p => p.debtClosed).map(p => `${a.id}|${p.id}`)));
+  next.archives.forEach(archive => (archive.projects || []).forEach(project => {
+    if (project.debtClosed && !closedBefore.has(`${archive.id}|${project.id}`)) {
+      entries.push({ category: "archive", action: "changed", text: `${plainText(archive.month, 12)}: ${plainText(project.name, 80)} qarzi yopildi` });
+    }
+  }));
+  const limit = 40;
+  if (entries.length > limit) {
+    const rest = entries.length - limit;
+    return [...entries.slice(0, limit), { category: "system", action: "changed", text: `Yana ${rest} ta o'zgarish` }];
+  }
+  return entries;
+}
+
+function activityRecords(req, entries, asSystem = false) {
+  const at = Date.now();
+  return entries.map((entry, index) => ({
+    id: `${at}-${index}-${crypto.randomBytes(3).toString("hex")}`,
+    at,
+    userId: asSystem ? "system" : req?.user?.id || "system",
+    username: plainText(asSystem ? "Tizim" : req?.user?.username || "Tizim", 60),
+    category: entry.category,
+    action: entry.action,
+    text: plainText(entry.text, 400)
+  }));
+}
+
+function canSeeActivity(req, entry) {
+  if (req.user?.role === "super_admin") return true;
+  if (req.user?.role === "client") return false;
+  const section = ACTIVITY_SECTIONS[entry.category];
+  if (!section || !section.perms.length) return false;
+  if (req.user?.role === "worker") return entry.category === "designs" && canAccess(req, "designs");
+  return section.perms.some(perm => canAccess(req, perm));
+}
+
+async function logActivity(req, entries, { asSystem = false } = {}) {
+  const records = activityRecords(req, entries, asSystem);
+  if (!records.length) return;
+  if (!firestore || usesMemoryStore(req)) {
+    memoryStore.activity.unshift(...records);
+    memoryStore.activity.length = Math.min(memoryStore.activity.length, 500);
+    return;
+  }
+  try {
+    const batch = firestore.batch();
+    records.forEach(record => batch.set(firestore.collection("activityLog").doc(record.id), record));
+    await withTimeout(batch.commit(), 10000);
+  } catch (err) {
+    console.error("Activity log write failed:", err.message);
+  }
 }
 
 function validateNewExpenseAllocations(currentFinance, nextFinance) {
@@ -432,9 +632,19 @@ function sendLogin(res, user) {
   });
 }
 
+function loginPhone(login) {
+  const raw = String(login || "").trim();
+  if (!/^[+\d\s()-]+$/.test(raw)) return "";
+  const phone = normalizePhone(raw);
+  return /^\d{10,15}$/.test(phone) ? phone : "";
+}
+
 async function findMemoryUser(login, password) {
   const normalized = String(login || "").toLowerCase();
-  const user = memoryStore.users.find((item) =>
+  const phone = loginPhone(login);
+  const phoneMatches = phone ? memoryStore.users.filter(item => normalizePhone(item.phone) === phone) : [];
+  if (phoneMatches.length > 1) return null;
+  const user = phoneMatches[0] || memoryStore.users.find((item) =>
     String(item.username || "").toLowerCase() === normalized ||
     String(item.email || "").toLowerCase() === normalized
   );
@@ -450,7 +660,7 @@ async function authRequired(req, res, next) {
   try {
     const claims = jwt.verify(token, JWT_SECRET);
     let user = memoryStore.users.find(item => item.id === claims.id);
-    if (claims.id === "fallback-super-admin") user = fallbackAdminUser();
+    if (claims.id === "fallback-super-admin") user = FALLBACK_ADMIN_ENABLED ? fallbackAdminUser() : null;
     if (!user && firestore) {
       const doc = await withTimeout(firestore.collection("users").doc(claims.id).get(), 10000);
       if (doc.exists) user = { id: doc.id, ...doc.data() };
@@ -520,14 +730,79 @@ function mediaChatId() {
   return chatId;
 }
 
-async function paymentIsLockedForUser(user) {
-  if (!firestore || user.id === "fallback-super-admin" || memoryStore.users.some((item) => item.id === user.id)) {
-    return addPaymentLockInfo(archiveOpenCycle(memoryStore.finance)).payment.locked;
+function usesMemoryStore(req) {
+  const id = req?.user?.id;
+  return !firestore || id === "fallback-super-admin" || (!!id && memoryStore.users.some((item) => item.id === id));
+}
+
+function financeFromDoc(doc) {
+  const raw = doc.exists ? doc.data() : {};
+  let finance = doc.exists ? (raw.data ?? raw) : DEFAULT_FINANCE;
+  if (typeof finance === "string") finance = safeJsonParse(finance, DEFAULT_FINANCE);
+  return {
+    finance,
+    revision: Number(raw.revision) || 0,
+    updatedAt: raw.updatedAt?.toMillis ? raw.updatedAt.toMillis() : Date.now()
+  };
+}
+
+class HttpError extends Error {
+  constructor(status, message, extra = {}) { super(message); this.status = status; this.extra = extra; }
+}
+
+// Moliya hujjatini o'qib-yozishning yagona yo'li. Firestore'da tranzaksiya ichida bajariladi:
+// bir vaqtda kelgan ikki so'rov bir-birining yozuvini yo'qotmaydi.
+// mutate(current, { revision, archived }) => { next?, result?, activity? }
+async function withFinance(req, mutate) {
+  const run = async (current, context) => {
+    try { return (await mutate(current, context)) || {}; }
+    catch (error) { return { error }; }
+  };
+  let result;
+  if (usesMemoryStore(req)) {
+    const stored = memoryStore.finance;
+    const prepared = archiveOpenCycle(stored);
+    const archived = JSON.stringify(normalizeFinance(prepared)) !== JSON.stringify(normalizeFinance(stored));
+    if (archived) {
+      memoryStore.finance = normalizeFinance(prepared);
+      memoryStore.revision += 1;
+    }
+    const outcome = await run(addPaymentLockInfo(prepared), { revision: memoryStore.revision, archived });
+    if (outcome.next && !outcome.error) {
+      memoryStore.finance = normalizeFinance(outcome.next);
+      memoryStore.revision += 1;
+    }
+    result = { ...outcome, archived, archivedMonth: prepared.payment.lastArchiveMonth, revision: memoryStore.revision, updatedAt: Date.now(), storage: "memory", previous: prepared };
+  } else {
+    const ref = firestore.collection("settings").doc("finance");
+    result = await firestore.runTransaction(async (tx) => {
+      const doc = await tx.get(ref);
+      const { finance, revision, updatedAt } = financeFromDoc(doc);
+      const prepared = archiveOpenCycle(finance);
+      const archived = JSON.stringify(normalizeFinance(prepared)) !== JSON.stringify(normalizeFinance(finance));
+      let nextRevision = archived ? revision + 1 : revision;
+      const outcome = await run(addPaymentLockInfo(prepared), { revision: nextRevision, archived });
+      // Xato bo'lsa ham oy arxivi saqlanadi; o'zgarish esa faqat xatosiz bo'lsa yoziladi.
+      const changes = outcome.next && !outcome.error ? outcome.next : null;
+      const toSave = changes || (archived ? prepared : null);
+      if (changes) nextRevision += 1;
+      if (toSave) {
+        tx.set(ref, { data: normalizeFinance(toSave), revision: nextRevision, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      }
+      return { ...outcome, archived, archivedMonth: prepared.payment.lastArchiveMonth, revision: nextRevision, updatedAt: toSave ? Date.now() : updatedAt, previous: prepared };
+    });
   }
+  if (result.archived) {
+    await logActivity(req, [{ category: "archive", action: "added", text: `${result.archivedMonth} oyi arxivlandi; qarzi qolgan zakazlar yangi oyga o'tdi` }], { asSystem: true });
+  }
+  if (result.error) throw result.error;
+  return result;
+}
+
+async function paymentIsLockedForUser(req) {
+  if (usesMemoryStore(req)) return addPaymentLockInfo(archiveOpenCycle(memoryStore.finance)).payment.locked;
   const doc = await firestore.collection("settings").doc("finance").get();
-  const value = doc.exists ? doc.data() : { data: DEFAULT_FINANCE };
-  const finance = value.data ?? value;
-  return addPaymentLockInfo(archiveOpenCycle(finance)).payment.locked;
+  return addPaymentLockInfo(archiveOpenCycle(financeFromDoc(doc).finance)).payment.locked;
 }
 
 // --- API Routes ---
@@ -547,7 +822,7 @@ app.post("/api/telegram/upload-photo", authRequired, async (req, res) => {
     if (kind === "measurement" && ["viewer", "client"].includes(req.user.role)) return res.status(403).json({ error: "O'lchov rasmi yuklash huquqi yo'q." });
     if (kind === "design" && !canAccess(req, "designs") && !canAccess(req, "projects")) return res.status(403).json({ error: "Dizaynlar huquqi kerak." });
     if (kind === "design" && ["viewer", "client", "worker"].includes(req.user.role)) return res.status(403).json({ error: "Dizayn yuborish huquqi yo'q." });
-    if (req.user.role !== "super_admin" && await paymentIsLockedForUser(req.user)) {
+    if (req.user.role !== "super_admin" && await paymentIsLockedForUser(req)) {
       return res.status(423).json({ error: "To'lov qilinmaguncha tizim yopiq." });
     }
     const match = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(req.body?.image || ""));
@@ -571,7 +846,7 @@ app.post("/api/telegram/upload-photo", authRequired, async (req, res) => {
 app.post("/api/telegram/send-design", authRequired, async (req, res) => {
   try {
     if ((!canAccess(req, "designs") && !canAccess(req, "projects")) || ["viewer", "client", "worker"].includes(req.user.role)) return res.status(403).json({ error: "Dizayn yuborish huquqi yo'q." });
-    if (req.user.role !== "super_admin" && await paymentIsLockedForUser(req.user)) return res.status(423).json({ error: "To'lov qilinmaguncha tizim yopiq." });
+    if (req.user.role !== "super_admin" && await paymentIsLockedForUser(req)) return res.status(423).json({ error: "To'lov qilinmaguncha tizim yopiq." });
     const finance = await telegramStaff.finance();
     const design = finance.designs.find(item => item.id === req.body?.designId);
     if (!design) return res.status(404).json({ error: "Saqlangan dizayn topilmadi." });
@@ -624,8 +899,13 @@ app.post("/api/telegram/announcement", authRequired, superAdminRequired, async (
 
 app.get("/api/auth/setup-status", async (_req, res) => {
   if (!firestore) return res.json({ needsSetup: false, fallback: true });
-  const usersSnapshot = await firestore.collection("users").limit(1).get();
-  res.json({ needsSetup: usersSnapshot.empty });
+  try {
+    const usersSnapshot = await withTimeout(firestore.collection("users").limit(1).get(), 10000);
+    res.json({ needsSetup: usersSnapshot.empty });
+  } catch (err) {
+    console.error("Setup status failed:", err.message);
+    res.json({ needsSetup: false });
+  }
 });
 
 app.post("/api/auth/setup", async (req, res) => {
@@ -674,7 +954,7 @@ app.post("/api/auth/login", async (req, res) => {
   const password = String(req.body?.password || "");
 
   if (!login && !password) return res.status(400).json({ error: "Login ham, parol ham kiritilmagan" });
-  if (!login) return res.status(400).json({ error: "Login kiritilmagan" });
+  if (!login) return res.status(400).json({ error: "Telefon raqami, login yoki email kiritilmagan" });
   if (!password) return res.status(400).json({ error: "Parol kiritilmagan" });
 
   try {
@@ -685,7 +965,17 @@ app.post("/api/auth/login", async (req, res) => {
     ]));
 
     let usersSnapshot = null;
+    const phone = loginPhone(login);
+    if (phone) {
+      usersSnapshot = await withTimeout(
+        firestore.collection("users").where("phone", "==", phone).limit(2).get(),
+        10000,
+        "Firebase phone login timeout"
+      );
+      if (usersSnapshot.docs.length > 1) return res.status(401).json({ error: "Telefon raqami takrorlangan. Superadminga murojaat qiling." });
+    }
     for (const value of loginVariants) {
+      if (usersSnapshot && !usersSnapshot.empty) break;
       usersSnapshot = await withTimeout(
         firestore.collection("users").where("username", "==", value).limit(1).get(),
         10000,
@@ -702,35 +992,26 @@ app.post("/api/auth/login", async (req, res) => {
       );
     }
 
-    if (!usersSnapshot || usersSnapshot.empty) {
-      return res.status(404).json({
-        error: `Bunday login topilmadi: ${login}. Katta-kichik harfni ham tekshiring yoki email bilan urinib ko'ring.`
-      });
-    }
+    // Xabar bir xil: tashqaridan qaysi login mavjudligini bilib bo'lmasin.
+    const badLogin = () => res.status(401).json({ error: "Telefon raqami, login yoki parol noto'g'ri." });
+    if (!usersSnapshot || usersSnapshot.empty) return badLogin();
 
     const userDoc = usersSnapshot.docs[0];
     const user = { id: userDoc.id, ...userDoc.data() };
-    if (!user.passHash) {
-      return res.status(401).json({
-        error: `Foydalanuvchi topildi, lekin parol hash saqlanmagan: ${user.username || login}. Parolni qayta o'rnating.`
-      });
-    }
-    
+    if (!user.passHash) return badLogin();
+
     const ok = await bcrypt.compare(password, user.passHash);
-    if (!ok) {
-      return res.status(401).json({
-        error: `Parol noto'g'ri. Login topildi: ${user.username || login}.`
-      });
-    }
+    if (!ok) return badLogin();
 
     sendLogin(res, user);
   } catch (err) {
     console.error("Login failed:", err.message);
     const memoryUser = await findMemoryUser(login, password);
     if (memoryUser) return sendLogin(res, memoryUser);
-    if (login === FALLBACK_ADMIN_USER && password === FALLBACK_ADMIN_PASS) {
+    if (FALLBACK_ADMIN_ENABLED && login === FALLBACK_ADMIN_USER && password === FALLBACK_ADMIN_PASS) {
       return sendLogin(res, fallbackAdminUser());
     }
+    if (!firestore) return res.status(401).json({ error: "Telefon raqami, login yoki parol noto'g'ri." });
     res.status(503).json({
       error: `Firebase bilan aloqa yo'q: ${err.message}. Vercel Environment Variables va Firebase service account sozlamasini tekshiring.`
     });
@@ -741,28 +1022,14 @@ app.post("/api/auth/google", async (req, res) => {
   const idToken = req.body?.idToken;
   if (!idToken) return res.status(400).json({ error: "Missing idToken" });
   try {
+    if (!firestore) return res.status(503).json({ error: "Firebase ulanmagan." });
     const decoded = await admin.auth().verifyIdToken(idToken);
-    const email = decoded.email || "";
-    const username = String(email).split("@")[0] || decoded.uid;
-
-    const usersRef = firestore.collection("users");
-    const q = await usersRef.where("username", "==", username).limit(1).get();
-    let userDoc;
-    
-    if (q.empty) {
-      const id = Math.random().toString(36).slice(2, 10);
-      const permissions = JSON.stringify(["dashboard", "projects", "designs", "workers", "founders", "expenses", "payments", "reports", "measurements"]);
-      await usersRef.doc(id).set({
-        username,
-        passHash: "",
-        role: "admin",
-        permissions,
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
-      });
-      userDoc = await usersRef.doc(id).get();
-    } else {
-      userDoc = q.docs[0];
-    }
+    const email = String(decoded.email || "").toLowerCase();
+    if (!email || decoded.email_verified !== true) return res.status(401).json({ error: "Tasdiqlangan email kerak." });
+    // Faqat super admin oldindan qo'shgan foydalanuvchi kira oladi; begona Google akkaunt yaratilmaydi.
+    const q = await firestore.collection("users").where("email", "==", email).limit(2).get();
+    if (q.docs.length !== 1) return res.status(403).json({ error: "Bu email uchun foydalanuvchi ochilmagan." });
+    const userDoc = q.docs[0];
 
     const user = { id: userDoc.id, ...userDoc.data() };
     const token = signToken(user);
@@ -796,33 +1063,22 @@ app.get("/api/auth/me", authRequired, async (req, res) => {
   }
 });
 
+function sendServerError(res, err, label) {
+  if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, ...err.extra });
+  console.error(`${label}:`, err.message);
+  res.status(503).json({ error: "Ma'lumotlar bazasi bilan aloqa yo'q. Birozdan keyin qayta urinib ko'ring." });
+}
+
 app.get("/api/finance", authRequired, async (req, res) => {
-  if (!firestore || req.user.id === "fallback-super-admin" || memoryStore.users.some((user) => user.id === req.user.id)) {
-    memoryStore.finance = addPaymentLockInfo(archiveOpenCycle(memoryStore.finance));
-    return res.json({
-      finance: visibleFinanceForUser(req, memoryStore.finance),
-      updatedAt: Date.now(),
-      storage: "memory"
+  try {
+    const state = await withFinance(req, () => ({}));
+    res.json({
+      finance: visibleFinanceForUser(req, addPaymentLockInfo(state.previous)),
+      revision: state.revision,
+      updatedAt: state.updatedAt,
+      ...(state.storage ? { storage: state.storage } : {})
     });
-  }
-  const financeDoc = await firestore.collection("settings").doc("finance").get();
-  const financeData = financeDoc.exists ? financeDoc.data() : { data: DEFAULT_FINANCE };
-  let finance = financeData.data ?? financeData;
-  if (typeof finance === "string") finance = safeJsonParse(finance, DEFAULT_FINANCE);
-  const preparedFinance = archiveOpenCycle(finance);
-  finance = addPaymentLockInfo(preparedFinance);
-
-  if (JSON.stringify(normalizeFinance(preparedFinance)) !== JSON.stringify(normalizeFinance(financeData.data ?? financeData))) {
-    await firestore.collection("settings").doc("finance").set({
-      data: normalizeFinance(preparedFinance),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
-  }
-
-  res.json({
-    finance: visibleFinanceForUser(req, finance),
-    updatedAt: financeData.updatedAt ? financeData.updatedAt.toMillis() : Date.now()
-  });
+  } catch (err) { sendServerError(res, err, "Finance read failed"); }
 });
 
 app.put("/api/finance", authRequired, async (req, res) => {
@@ -831,61 +1087,57 @@ app.put("/api/finance", authRequired, async (req, res) => {
   if (!FINANCE_PERMS.some((perm) => canAccess(req, perm))) {
     return res.status(403).json({ error: "Forbidden" });
   }
-  if (!firestore || req.user.id === "fallback-super-admin" || memoryStore.users.some((user) => user.id === req.user.id)) {
-    const current = addPaymentLockInfo(archiveOpenCycle(memoryStore.finance));
-    if (current.payment.locked && req.user.role !== "super_admin") {
-      return res.status(423).json({ error: "To'lov sanasi. Super admin to'lov qilindi deb belgilamaguncha tizim yopiq." });
-    }
-    const mergedFinance = mergeFinanceForUser(req, current, finance);
-    const allocationError = validateFinanceChanges(current, mergedFinance) || validateNewExpenseAllocations(current, mergedFinance);
-    if (allocationError) return res.status(400).json({ error: allocationError });
-    memoryStore.finance = mergedFinance;
-    const warnings = await telegramStaff.notifyChanges(current, mergedFinance);
-    return res.json({ ok: true, storage: "memory", warnings });
-  }
-  const financeDoc = await firestore.collection("settings").doc("finance").get();
-  const financeData = financeDoc.exists ? financeDoc.data() : { data: DEFAULT_FINANCE };
-  let currentFinance = financeData.data ?? financeData;
-  if (typeof currentFinance === "string") currentFinance = safeJsonParse(currentFinance, DEFAULT_FINANCE);
-  currentFinance = addPaymentLockInfo(archiveOpenCycle(currentFinance));
-  if (currentFinance.payment.locked && req.user.role !== "super_admin") {
-    return res.status(423).json({ error: "To'lov sanasi. Super admin to'lov qilindi deb belgilamaguncha tizim yopiq." });
-  }
-  const mergedFinance = mergeFinanceForUser(req, currentFinance, finance);
-  const allocationError = validateFinanceChanges(currentFinance, mergedFinance) || validateNewExpenseAllocations(currentFinance, mergedFinance);
-  if (allocationError) return res.status(400).json({ error: allocationError });
-  
-  await firestore.collection("settings").doc("finance").set({
-    data: normalizeFinance(mergedFinance),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp()
-  });
-  const warnings = await telegramStaff.notifyChanges(currentFinance, mergedFinance);
-  res.json({ ok: true, warnings });
+  const clientRevision = Number(req.body?.revision);
+  try {
+    const state = await withFinance(req, (current, { revision, archived }) => {
+      // Eskirgan sahifadan kelgan butun ro'yxat boshqa foydalanuvchi kiritgan yozuvlarni o'chirib yubormasin.
+      if (archived || !Number.isFinite(clientRevision) || clientRevision !== revision) {
+        throw new HttpError(409, archived
+          ? "Yangi oy boshlandi va o'tgan oy arxivlandi. Ma'lumotlar yangilandi, amalni qayta bajaring."
+          : "Ma'lumotlar boshqa foydalanuvchi tomonidan o'zgartirilgan. Sahifa yangilandi, amalni qayta bajaring.", { conflict: true });
+      }
+      if (current.payment.locked && req.user.role !== "super_admin") {
+        throw new HttpError(423, "To'lov sanasi. Super admin to'lov qilindi deb belgilamaguncha tizim yopiq.");
+      }
+      const mergedFinance = mergeFinanceForUser(req, current, finance);
+      const validationError = validateFinanceChanges(current, mergedFinance) || validateNewExpenseAllocations(current, mergedFinance);
+      if (validationError) throw new HttpError(400, validationError);
+      return { next: mergedFinance };
+    });
+    await logActivity(req, financeActivity(state.previous, state.next));
+    const warnings = await telegramStaff.notifyChanges(normalizeFinance(state.previous), normalizeFinance(state.next));
+    res.json({ ok: true, revision: state.revision, warnings, ...(state.storage ? { storage: state.storage } : {}) });
+  } catch (err) { sendServerError(res, err, "Finance save failed"); }
 });
 
-app.post("/api/payment/mark-paid", authRequired, superAdminRequired, async (_req, res) => {
+app.post("/api/payment/mark-paid", authRequired, superAdminRequired, async (req, res) => {
   const now = tashkentDateParts();
+  try {
+    const state = await withFinance(req, (current) => {
+      const next = normalizeFinance(current);
+      next.payment.lastPaidMonth = now.monthKey;
+      return { next };
+    });
+    await logActivity(req, [{ category: "system", action: "changed", text: `${now.monthKey} oyi uchun dastur to'lovi tasdiqlandi` }]);
+    res.json({ ok: true, revision: state.revision, finance: visibleFinanceForUser(req, addPaymentLockInfo(state.next)), ...(state.storage ? { storage: state.storage } : {}) });
+  } catch (err) { sendServerError(res, err, "Mark paid failed"); }
+});
 
-  if (!firestore || _req.user.id === "fallback-super-admin" || memoryStore.users.some((user) => user.id === _req.user.id)) {
-    const finance = addPaymentLockInfo(archiveOpenCycle(memoryStore.finance));
-    finance.payment.lastPaidMonth = now.monthKey;
-    memoryStore.finance = addPaymentLockInfo(finance);
-    return res.json({ ok: true, finance: visibleFinanceForUser(_req, memoryStore.finance), storage: "memory" });
+app.get("/api/news", authRequired, async (req, res) => {
+  let activity = [];
+  try {
+    if (usesMemoryStore(req)) activity = memoryStore.activity;
+    else {
+      const snapshot = await withTimeout(firestore.collection("activityLog").orderBy("at", "desc").limit(300).get(), 10000);
+      activity = snapshot.docs.map(doc => doc.data());
+    }
+  } catch (err) {
+    console.error("Activity log read failed:", err.message);
   }
-
-  const financeDoc = await firestore.collection("settings").doc("finance").get();
-  const financeData = financeDoc.exists ? financeDoc.data() : { data: DEFAULT_FINANCE };
-  let finance = financeData.data ?? financeData;
-  if (typeof finance === "string") finance = safeJsonParse(finance, DEFAULT_FINANCE);
-  finance = addPaymentLockInfo(archiveOpenCycle(finance));
-  finance.payment.lastPaidMonth = now.monthKey;
-
-  await firestore.collection("settings").doc("finance").set({
-    data: normalizeFinance(finance),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+  res.json({
+    changelog: req.user.role === "client" ? [] : CHANGELOG,
+    activity: activity.filter(entry => canSeeActivity(req, entry)).slice(0, 100)
   });
-
-  res.json({ ok: true, finance: visibleFinanceForUser(_req, addPaymentLockInfo(finance)) });
 });
 
 app.get("/api/users", authRequired, superAdminRequired, async (_req, res) => {
@@ -989,6 +1241,7 @@ app.post("/api/users", authRequired, superAdminRequired, async (req, res) => {
       "Firebase create user timeout"
     );
 
+    await logActivity(req, [{ category: "users", action: "added", text: `${username} (${role}) qo'shildi` }]);
     return res.json({ ok: true, storage: "firebase" });
   } catch (err) {
     if (firestore) return res.status(err.status || 503).json({ error: err.status ? err.message : "Foydalanuvchini bazaga saqlab bo'lmadi. Qayta urinib ko'ring." });
@@ -1010,6 +1263,7 @@ app.post("/api/users", authRequired, superAdminRequired, async (req, res) => {
     createdAt: Date.now()
   });
 
+  await logActivity(req, [{ category: "users", action: "added", text: `${username} (${role}) qo'shildi` }]);
   res.json({
     ok: true,
     storage: "memory",
@@ -1040,6 +1294,7 @@ app.put("/api/users/:id", authRequired, superAdminRequired, async (req, res) => 
     }
     if (memoryUser) Object.assign(memoryUser, changes);
     else await withTimeout(saveFirestoreUser(id, changes), 10000);
+    await logActivity(req, [{ category: "users", action: "changed", text: `${sanitizeText(user.username, 40)}: rol ${role}, bo'limlar: ${[...new Set(permissions)].join(", ") || "-"}${req.body.password ? ", parol yangilandi" : ""}` }]);
     res.json({ ok: true });
   } catch (err) { res.status(err.status || 503).json({ error: err.message }); }
 });
@@ -1051,7 +1306,8 @@ app.delete("/api/users/:id", authRequired, superAdminRequired, async (req, res) 
     if (memoryStore.users[memoryIndex].role === "super_admin") {
       return res.status(400).json({ error: "Super adminni o'chirib bo'lmaydi" });
     }
-    memoryStore.users.splice(memoryIndex, 1);
+    const [removed] = memoryStore.users.splice(memoryIndex, 1);
+    await logActivity(req, [{ category: "users", action: "deleted", text: `${sanitizeText(removed.username, 40)} o'chirildi` }]);
     return res.json({ ok: true, storage: "memory" });
   }
 
@@ -1071,6 +1327,7 @@ app.delete("/api/users/:id", authRequired, superAdminRequired, async (req, res) 
       10000,
       "Firebase user delete timeout"
     );
+    await logActivity(req, [{ category: "users", action: "deleted", text: `${sanitizeText(user.username, 40)} o'chirildi` }]);
     res.json({ ok: true, storage: "firebase" });
   } catch (err) {
     res.status(503).json({ error: `Firebase bilan aloqa yo'q: ${err.message}` });

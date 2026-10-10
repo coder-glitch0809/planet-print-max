@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node --test scripts/features.test.js"
+    "test": "node --test scripts/features.test.js scripts/finance.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

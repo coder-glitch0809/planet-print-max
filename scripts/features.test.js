@@ -10,7 +10,7 @@ const root = path.resolve(__dirname, "..");
 test("permissions, MAX-equivalent payment and Telegram staff registration", async t => {
   const now = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tashkent", year: "numeric", month: "2-digit" }).format(new Date());
   const sent = [];
-  const env = { JWT_SECRET: "isolated-test-secret", TELEGRAM_WEBHOOK_SECRET: "isolated-webhook-secret", TELEGRAM_BOT_TOKEN: "fake-test-token" };
+  const env = { JWT_SECRET: "isolated-test-secret", TELEGRAM_WEBHOOK_SECRET: "isolated-webhook-secret", TELEGRAM_BOT_TOKEN: "fake-test-token", SUPER_PASS: "isolated-super-pass" };
   const previousEnv = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
   Object.assign(process.env, env);
   t.after(() => { for (const [key, value] of Object.entries(previousEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
@@ -24,6 +24,7 @@ test("permissions, MAX-equivalent payment and Telegram staff registration", asyn
   };
   let source = fs.readFileSync(path.join(root, "server.js"), "utf8");
   source = source.replace('require("dotenv").config();', "").replace('const dbReady = initDb().catch', 'const dbReady = Promise.resolve().catch');
+  source += '\nmodule.exports.setTestFirestore = value => { firestore = value; };';
   vm.runInNewContext(source, context, { filename: "server.js" });
   const store = context.global.__planetPrintMemoryStore;
   store.finance = { projects: [{ id: "p1", name: "Banner", amount: 1000, advance: 200 }], payments: [], workers: [{ id: "w1", name: "Ali", phone: "+998 90 123 45 67", notifications: ["payments", "designs"] }], payment: { currentMonth: now, lastPaidMonth: now } };
@@ -34,6 +35,10 @@ test("permissions, MAX-equivalent payment and Telegram staff registration", asyn
   const base = `http://127.0.0.1:${server.address().port}`;
   const token = id => jwt.sign({ id, role: "super_admin", permissions: ["settings", "workers", "projects"] }, env.JWT_SECRET);
   const request = async (url, method = "GET", body, id = "a1", extra = {}) => {
+    // Moliya PUT so'rovi oxirgi revision bilan yuboriladi (eskirgan sahifa himoyasi).
+    if (url === "/api/finance" && method === "PUT" && body && body.revision === undefined) {
+      body = { ...body, revision: (await request("/api/finance", "GET", null, "fallback-super-admin")).body.revision };
+    }
     const response = await fetch(base + url, { method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token(id)}`, ...extra }, ...(body ? { body: JSON.stringify(body) } : {}) });
     return { status: response.status, body: await response.json().catch(() => ({})) };
   };
@@ -141,6 +146,38 @@ test("permissions, MAX-equivalent payment and Telegram staff registration", asyn
     const result = await request("/api/telegram/staff", "GET", null, "fallback-super-admin");
     assert.equal(result.body.workers.find(w => w.id === installerId).chatId, "");
     assert.equal((await request("/api/telegram/send-design", "POST", { designId: "design1" }, "fallback-super-admin")).status, 502);
+  });
+  await t.test("admins sign in with normalized phone and password, while login and email still work", async () => {
+    const account = store.users.find(u => u.id === "a1");
+    account.role = "admin";
+    account.email = "admin@example.invalid";
+    account.passHash = await require("bcryptjs").hash("phone-login-test", 4);
+    for (const username of ["+998 90 123 45 67", "998901234567", "901234567", "admin", "admin@example.invalid"]) {
+      const result = await request("/api/auth/login", "POST", { username, password: "phone-login-test" });
+      assert.equal(result.status, 200, username);
+      assert.equal(result.body.user.id, "a1");
+      assert.equal(result.body.user.role, "admin");
+      assert.ok(result.body.token);
+    }
+    assert.equal((await request("/api/auth/login", "POST", { username: "901234567", password: "wrong-password" })).status, 401);
+    assert.equal((await request("/api/auth/login", "POST", { username: "901234567" })).status, 400);
+    assert.equal((await request("/api/auth/login", "POST", { username: "abc901234567", password: "phone-login-test" })).status, 401);
+  });
+  await t.test("Firestore phone login queries canonical number and rejects duplicates", async () => {
+    const account = store.users.find(u => u.id === "a1");
+    let duplicate = false;
+    const queries = [];
+    context.module.exports.setTestFirestore({ collection: () => ({ where: (field, operator, value) => {
+      queries.push({ field, value });
+      return { limit: () => ({ get: async () => ({ empty: false, docs: Array.from({ length: duplicate ? 2 : 1 }, (_, i) => ({ id: `db${i}`, data: () => account })) }) }) };
+    } }) });
+    try {
+      const result = await request("/api/auth/login", "POST", { username: "+998 (90) 123-45-67", password: "phone-login-test" });
+      assert.equal(result.status, 200);
+      assert.deepEqual(queries, [{ field: "phone", value: "998901234567" }]);
+      duplicate = true;
+      assert.equal((await request("/api/auth/login", "POST", { username: "901234567", password: "phone-login-test" })).status, 401);
+    } finally { context.module.exports.setTestFirestore(null); }
   });
   await t.test("deleted users cannot reuse tokens", async () => {
     store.users.length = 0;
