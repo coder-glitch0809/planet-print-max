@@ -17,7 +17,9 @@ function resolveJwtSecret() {
   const configured = String(process.env.JWT_SECRET || "");
   const placeholders = ["", "please_change_to_long_random_secret", "planet_print_change_me"];
   if (!placeholders.includes(configured)) return configured;
-  let material = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || process.env.FIREBASE_SERVICE_ACCOUNT || "";
+  // Barcha server nusxalarida bir xil bo'lishi shart: aks holda token boshqa nusxada "Invalid token" bo'ladi.
+  let material = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || process.env.FIREBASE_SERVICE_ACCOUNT ||
+    String(process.env.FIREBASE_PRIVATE_KEY || "").trim() || "";
   if (!material) {
     try { material = fs.readFileSync(path.join(__dirname, "firebase-config.json"), "utf8"); } catch { material = ""; }
   }
@@ -709,8 +711,10 @@ async function authRequired(req, res, next) {
   const auth = req.headers.authorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   if (!token) return res.status(401).json({ error: "Unauthorized" });
+  let claims;
+  try { claims = jwt.verify(token, JWT_SECRET); }
+  catch { return res.status(401).json({ error: "Sessiya eskirgan. Iltimos, qaytadan kiring." }); }
   try {
-    const claims = jwt.verify(token, JWT_SECRET);
     let user = memoryStore.users.find(item => item.id === claims.id);
     if (claims.id === "fallback-super-admin") user = FALLBACK_ADMIN_ENABLED ? fallbackAdminUser() : null;
     if (!user && firestore) {
@@ -720,8 +724,9 @@ async function authRequired(req, res, next) {
     if (!user) return res.status(401).json({ error: "User not found" });
     req.user = publicUser(user);
     next();
-  } catch {
-    res.status(401).json({ error: "Invalid token" });
+  } catch (err) {
+    // Baza vaqtincha javob bermasa, foydalanuvchini tizimdan chiqarib yubormaymiz.
+    res.status(503).json({ error: `Ma'lumotlar bazasi javob bermadi, qayta urinib ko'ring. (${err.message})` });
   }
 }
 

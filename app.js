@@ -255,6 +255,11 @@
         if (token) headers.Authorization = `Bearer ${token}`;
       }
       const { resp, data } = await fetchJson(path, { ...options, headers });
+      // Sessiya eskirgan bo'lsa, login sahifasiga qaytaramiz: aks holda har bir amal xato beradi.
+      if (resp.status === 401 && auth && state.currentUser) {
+        logout();
+        msg(el.loginMsg, data.error || "Sessiya eskirgan. Iltimos, qaytadan kiring.", "err");
+      }
       if (!resp.ok) throw new Error(data.error || "Server xatoligi");
       return data;
     }
@@ -1000,12 +1005,15 @@
         fundedByProjectId: row.querySelector("[data-allocation-source]")?.value || "",
         amount: row.querySelector("[data-allocation-amount]")?.value || ""
       })) : allocations;
-      const rows = existingRows.length ? existingRows : [{ projectId: "", fundedByProjectId: "", amount: "" }];
-      const founderMode = el.eType.value === "founder_avans";
       const optional = isPersonExpense();
+      // Avansda zakaz qatori faqat "+ Zakaz qo'shish" bosilganda chiqadi; bo'sh qatorlar ko'rsatilmaydi.
+      const filled = optional ? existingRows.filter(row => row.projectId || String(row.amount || "").trim()) : existingRows;
+      const rows = filled.length ? filled : optional ? [] : [{ projectId: "", fundedByProjectId: "", amount: "" }];
+      // Avansda tanlangan zakazning o'zi pul olingan zakaz: alohida "pul manbai" maydoni kerak emas.
+      const noSource = optional;
       el.expenseAllocations.innerHTML = rows.map((allocation, index) => `
-        <div class="allocation-row${founderMode ? " no-source" : ""}" data-allocation-row>
-          <label class="allocation-select-label">${founderMode ? "Pul olingan zakaz" : optional ? "Zakaz" : "Xarajat qaysi zakaz uchun"} ${rows.length > 1 ? index + 1 : ""}<select data-allocation-project ${optional ? "" : "required"}>${allocationProjectOptions(allocation.projectId || "", optional ? { placeholder: "Zakazsiz (umumiy)", allowEmpty: true } : {})}</select></label>
+        <div class="allocation-row${noSource ? " no-source" : ""}" data-allocation-row>
+          <label class="allocation-select-label">${optional ? "Pul olingan zakaz" : "Xarajat qaysi zakaz uchun"} ${rows.length > 1 ? index + 1 : ""}<select data-allocation-project ${optional ? "" : "required"}>${allocationProjectOptions(allocation.projectId || "", optional ? { placeholder: "Zakazsiz (umumiy)", allowEmpty: true } : {})}</select></label>
           <label class="allocation-source">Pul qaysi zakazdan olindi<select data-allocation-source>${allocationProjectOptions(allocation.fundedByProjectId && allocation.fundedByProjectId !== allocation.projectId ? allocation.fundedByProjectId : "", { placeholder: "Shu zakazning o'z pulidan", allowEmpty: true })}</select></label>
           <label>Summa (UZS)<input data-allocation-amount inputmode="decimal" value="${clean(allocation.amount)}" placeholder="0" ${optional ? "" : "required"} /></label>
           <button class="danger small-btn" type="button" data-remove-allocation aria-label="Zakaz taqsimotini o'chirish">O'chirish</button>
@@ -1034,14 +1042,14 @@
     }
 
     function readExpenseAllocations() {
-      const founderMode = el.eType.value === "founder_avans";
       const optional = isPersonExpense();
       return Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-row]")).filter(row =>
         // Avansda bo'sh qoldirilgan qator hisobga olinmaydi.
         !optional || row.querySelector("[data-allocation-project]").value || String(row.querySelector("[data-allocation-amount]").value).trim()
       ).map(row => {
         const projectId = row.querySelector("[data-allocation-project]").value;
-        const fundedBy = founderMode ? "" : (row.querySelector("[data-allocation-source]")?.value || "");
+        // Avansda pul aynan tanlangan zakazdan olingan hisoblanadi.
+        const fundedBy = optional ? "" : (row.querySelector("[data-allocation-source]")?.value || "");
         const allocation = {
           projectId,
           projectName: knownProjectName(projectId, ""),
@@ -2279,9 +2287,10 @@
       el.addAllocationBtn.addEventListener("click", () => {
         const rows = Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-row]")).map(row => ({
           projectId: row.querySelector("[data-allocation-project]").value,
+          fundedByProjectId: row.querySelector("[data-allocation-source]")?.value || "",
           amount: row.querySelector("[data-allocation-amount]").value
         }));
-        rows.push({ projectId: "", amount: "" });
+        rows.push({ projectId: "", fundedByProjectId: "", amount: "" });
         renderAllocationRows(rows);
       });
       if (el.markPaidBtn) {
