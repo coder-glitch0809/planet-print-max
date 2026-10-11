@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, "..");
 
 // Serverni Firebase'siz (xotira rejimida) va haqiqiy Telegramsiz yuklaydi.
 async function startServer(t) {
-  const env = { JWT_SECRET: "finance-test-secret", SUPER_PASS: "finance-super-pass" };
+  const env = { JWT_SECRET: "finance-test-secret", SUPER_PASS: "finance-super-pass", ALLOW_MEMORY_STORE: "1" };
   const context = {
     require: createRequire(path.join(root, "server.js")), __dirname: root, module: { exports: {} },
     process: { env }, console: { log() {}, warn() {}, error() {} }, Buffer, setTimeout, clearTimeout,

@@ -30,6 +30,9 @@ const JWT_SECRET = resolveJwtSecret();
 const FALLBACK_ADMIN_USER = process.env.SUPER_USER || "Superadmin";
 const FALLBACK_ADMIN_PASS = String(process.env.SUPER_PASS || "");
 const FALLBACK_ADMIN_ENABLED = FALLBACK_ADMIN_PASS.length >= 8;
+// Baza ulanmaganda o'zgarishlarni vaqtinchalik xotiraga yozish (redeploydan keyin yo'qoladi).
+// Faqat testlar/lokal sinov uchun yoqiladi; productionda ma'lumot jim yo'qolmasligi uchun o'chiq.
+const MEMORY_WRITES_ALLOWED = process.env.ALLOW_MEMORY_STORE === "1";
 
 function clearDeadLocalProxy() {
   const proxyKeys = [
@@ -94,28 +97,40 @@ function normalizeServiceAccount(serviceAccount) {
   return serviceAccount;
 }
 
+// Vercel'ga kalit turli ko'rinishda qo'yilishi mumkin: base64, oddiy JSON, qo'shtirnoq ichida
+// yoki qator uzilishlari bilan. Hammasini bir xil o'qiymiz.
+function parseServiceAccountValue(value) {
+  let text = String(value || "").trim();
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    text = text.slice(1, -1).trim();
+  }
+  if (!text) throw new Error("bo'sh qiymat");
+  if (!text.startsWith("{")) {
+    text = Buffer.from(text.replace(/\s+/g, ""), "base64").toString("utf8").trim();
+  }
+  const parsed = JSON.parse(text);
+  if (!parsed.project_id || !parsed.private_key || !parsed.client_email) {
+    throw new Error("project_id, private_key yoki client_email yo'q");
+  }
+  return normalizeServiceAccount(parsed);
+}
+
+const firebaseConfigProblems = [];
+
 async function initDb() {
   let serviceAccount = null;
 
   // 1. Environment Variable orqali tekshirish (Vercel uchun eng asosiysi)
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+  for (const key of ["FIREBASE_SERVICE_ACCOUNT_BASE64", "FIREBASE_SERVICE_ACCOUNT"]) {
+    if (serviceAccount || !process.env[key]) continue;
     try {
-      const decoded = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, "base64").toString("utf8");
-      serviceAccount = normalizeServiceAccount(JSON.parse(decoded));
-      console.log("Firebase loaded from FIREBASE_SERVICE_ACCOUNT_BASE64");
+      serviceAccount = parseServiceAccountValue(process.env[key]);
+      console.log(`Firebase loaded from ${key}`);
     } catch (err) {
-      console.error("FIREBASE_SERVICE_ACCOUNT_BASE64 parse xatosi:", err.message);
+      firebaseConfigProblems.push(`${key} noto'g'ri: ${err.message}`);
+      console.error(`${key} parse xatosi:`, err.message);
     }
   }
-
-  if (!serviceAccount && process.env.FIREBASE_SERVICE_ACCOUNT) {
-    try {
-      serviceAccount = normalizeServiceAccount(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT));
-      console.log("✅ Firebase loaded from Environment Variables");
-    } catch (err) {
-      console.error('❌ FIREBASE_SERVICE_ACCOUNT parse xatosi:', err.message);
-    }
-  } 
   
   // 2. Agar ENV bo'lmasa, fayldan qidirish (Local dev uchun)
   if (!serviceAccount) {
@@ -132,8 +147,11 @@ async function initDb() {
 
   // 3. Tekshiruv: Ma'lumot umuman topilmasa xato berish
   if (!serviceAccount || !serviceAccount.project_id || serviceAccount.project_id === "SIZNING_PROJECT_ID") {
-    console.error("❌ Firebase config topilmadi! Vercel Settings -> Environment Variables orqali FIREBASE_SERVICE_ACCOUNT ni qo'shing.");
-    throw new Error('Firebase credentials missing or invalid');
+    console.error("❌ Firebase config topilmadi! Vercel Settings -> Environment Variables orqali FIREBASE_SERVICE_ACCOUNT_BASE64 ni qo'shing.");
+    const reason = firebaseConfigProblems.length
+      ? firebaseConfigProblems.join("; ")
+      : "FIREBASE_SERVICE_ACCOUNT_BASE64 o'zgaruvchisi serverda yo'q";
+    throw new Error(reason);
   }
 
   // Initsializatsiya (Faqat bir marta)
@@ -742,7 +760,8 @@ async function telegramApi(method, body, isForm = false) {
 
 function usesMemoryStore(req) {
   const id = req?.user?.id;
-  return !firestore || id === "fallback-super-admin" || (!!id && memoryStore.users.some((item) => item.id === id));
+  // Zaxira admin ham baza ulangan bo'lsa haqiqiy ma'lumotlar bilan ishlaydi.
+  return !firestore || (!!id && memoryStore.users.some((item) => item.id === id));
 }
 
 function financeFromDoc(doc) {
@@ -770,15 +789,21 @@ async function withFinance(req, mutate) {
   };
   let result;
   if (usesMemoryStore(req)) {
+    // Baza ulanmaganda o'zgarishlar vaqtinchalik xotiraga yozilmaydi: Vercel qayta ishga
+    // tushganda ular jim yo'qolib ketardi. Foydalanuvchiga saqlanmagani aniq aytiladi.
+    // ALLOW_MEMORY_STORE faqat testlar va lokal sinov uchun.
     const stored = memoryStore.finance;
     const prepared = archiveOpenCycle(stored);
-    const archived = JSON.stringify(normalizeFinance(prepared)) !== JSON.stringify(normalizeFinance(stored));
+    const archived = MEMORY_WRITES_ALLOWED && JSON.stringify(normalizeFinance(prepared)) !== JSON.stringify(normalizeFinance(stored));
     if (archived) {
       memoryStore.finance = normalizeFinance(prepared);
       memoryStore.revision += 1;
     }
     const outcome = await run(addPaymentLockInfo(prepared), { revision: memoryStore.revision, archived });
     if (outcome.next && !outcome.error) {
+      if (!MEMORY_WRITES_ALLOWED) {
+        throw new HttpError(503, "Ma'lumotlar bazasi (Firebase) ulanmagan, o'zgarish saqlanmadi. Yo'qolib ketmasligi uchun bazani ulang va qayta urinib ko'ring.");
+      }
       memoryStore.finance = normalizeFinance(outcome.next);
       memoryStore.revision += 1;
     }
@@ -818,7 +843,7 @@ async function paymentIsLockedForUser(req) {
 // --- API Routes ---
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, now: new Date().toISOString(), db: !!firestore, fallback: !!dbInitError });
+  res.json({ ok: true, now: new Date().toISOString(), db: !!firestore, fallback: !!dbInitError, dbError: dbInitError?.message || null });
 });
 
 const { normalizePhone, createTelegramStaff } = require("./telegram-staff");
@@ -1031,7 +1056,7 @@ app.post("/api/auth/login", async (req, res) => {
       return sendLogin(res, fallbackAdminUser());
     }
     // Baza ulanmagan bo'lsa, to'g'ri parol ham tekshirib bo'lmaydi: sababini aniq aytamiz.
-    if (!firestore) return res.status(401).json({ error: "Server ma'lumotlar bazasiga (Firebase) ulanmagan, shuning uchun login tekshirilmadi. Hostingda (Vercel → Settings → Environment Variables) FIREBASE_SERVICE_ACCOUNT_BASE64 ni tekshiring va qayta deploy qiling." });
+    if (!firestore) return res.status(401).json({ error: `Server ma'lumotlar bazasiga (Firebase) ulanmagan, shuning uchun login tekshirilmadi. Sabab: ${dbInitError?.message || "noma'lum"}. Hostingda (Vercel → Settings → Environment Variables) FIREBASE_SERVICE_ACCOUNT_BASE64 ni tekshiring va qayta deploy qiling.` });
     res.status(503).json({
       error: `Firebase bilan aloqa yo'q: ${err.message}. Vercel Environment Variables va Firebase service account sozlamasini tekshiring.`
     });
@@ -1265,7 +1290,11 @@ app.post("/api/users", authRequired, superAdminRequired, async (req, res) => {
     return res.json({ ok: true, storage: "firebase" });
   } catch (err) {
     if (firestore) return res.status(err.status || 503).json({ error: err.status ? err.message : "Foydalanuvchini bazaga saqlab bo'lmadi. Qayta urinib ko'ring." });
-    console.error("Create user fallback mode:", err.message);
+    console.error("Create user failed, Firebase not connected:", err.message);
+    // Vaqtinchalik xotiradagi foydalanuvchi qayta ishga tushishda yo'qolardi, shuning uchun saqlamaymiz.
+    if (!MEMORY_WRITES_ALLOWED) {
+      return res.status(503).json({ error: "Ma'lumotlar bazasi (Firebase) ulanmagan, foydalanuvchi saqlanmadi. Bazani ulang va qayta urinib ko'ring." });
+    }
   }
 
   const normalized = username.toLowerCase();
@@ -1284,11 +1313,7 @@ app.post("/api/users", authRequired, superAdminRequired, async (req, res) => {
   });
 
   await logActivity(req, [{ category: "users", action: "added", text: `${username} (${role}) qo'shildi` }]);
-  res.json({
-    ok: true,
-    storage: "memory",
-    warning: "Firebase ishlamagani uchun foydalanuvchi vaqtinchalik server xotirasida saqlandi. Vercel redeploy/cold startdan keyin yo'qolishi mumkin."
-  });
+  res.json({ ok: true, storage: "memory" });
 });
 
 app.put("/api/users/:id", authRequired, superAdminRequired, async (req, res) => {

@@ -10,7 +10,7 @@ const root = path.resolve(__dirname, "..");
 test("permissions, MAX-equivalent payment and Telegram staff registration", async t => {
   const now = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tashkent", year: "numeric", month: "2-digit" }).format(new Date());
   const sent = [];
-  const env = { JWT_SECRET: "isolated-test-secret", TELEGRAM_WEBHOOK_SECRET: "isolated-webhook-secret", TELEGRAM_BOT_TOKEN: "fake-test-token", SUPER_PASS: "isolated-super-pass" };
+  const env = { JWT_SECRET: "isolated-test-secret", TELEGRAM_WEBHOOK_SECRET: "isolated-webhook-secret", TELEGRAM_BOT_TOKEN: "fake-test-token", SUPER_PASS: "isolated-super-pass", ALLOW_MEMORY_STORE: "1" };
   const previousEnv = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
   Object.assign(process.env, env);
   t.after(() => { for (const [key, value] of Object.entries(previousEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
