@@ -130,16 +130,21 @@ test("permissions, MAX-equivalent payment and Telegram staff registration", asyn
     const delivery = await request("/api/telegram/send-design", "POST", { designId: "design1" }, "fallback-super-admin");
     assert.equal(delivery.status, 200);
     assert.equal(delivery.body.delivery.sent, 1);
-    assert.equal(sent.at(-1).chat_id, "456");
-    assert.equal(sent.at(-1).photo, "fake-photo-id");
-    assert.match(sent.at(-1).caption, /200 x 100 sm, 2 dona/);
-    assert.match(sent.at(-1).caption, /Fasadga ornatish/);
-    assert.equal(sent.length, before + 1);
+    const designMessage = sent.at(-2);
+    assert.equal(designMessage.chat_id, "456");
+    assert.equal(designMessage.photo, "fake-photo-id");
+    assert.match(designMessage.caption, /200 x 100 sm, 2 dona/);
+    assert.match(designMessage.caption, /Fasadga ornatish/);
+    assert.match(designMessage.caption, /Zakaz: <b>Banner<\/b>/);
+    assert.match(designMessage.caption, /Dizaynni tasdiqladi/);
+    // Vazifa montajnik chatida qadalib turadi.
+    assert.deepEqual(sent.at(-1), { chat_id: "456", message_id: before + 1, disable_notification: true });
+    assert.equal(sent.length, before + 2);
     assert.equal((await request("/api/telegram/send-design", "POST", { designId: "design1" }, installerId)).status, 403);
     // Current permissions, not those recorded at binding time, control delivery.
     await request(`/api/users/${installerId}`, "PUT", { role: "worker", permissions: [] }, "fallback-super-admin");
     assert.equal((await request("/api/telegram/send-design", "POST", { designId: "design1" }, "fallback-super-admin")).status, 502);
-    assert.equal(sent.length, before + 1);
+    assert.equal(sent.length, before + 2);
   });
   await t.test("changing account phone disables the old Telegram binding", async () => {
     await request(`/api/users/${installerId}`, "PUT", { role: "worker", permissions: ["designs"], phone: "+998 93 111 22 33" }, "fallback-super-admin");
@@ -236,6 +241,11 @@ test("Telegram role and section policy", () => {
   assert.equal(canReceive({ role: "designer", permissions: '["designs"]' }, "designs"), true);
   assert.equal(canReceive({ role: "designer", permissions: ["designs"] }, "payments"), false);
   assert.equal(canReceive({ role: "accountant", permissions: ["payments", "expenses"] }, "expenses"), true);
-  assert.equal(canReceive({ role: "manager", permissions: ["projects"] }, "projects"), true);
+  // Pulga oid xabarlar faqat buxgalter va superadminga.
+  assert.equal(canReceive({ role: "manager", permissions: ["projects", "payments", "expenses"] }, "projects"), false);
+  assert.equal(canReceive({ role: "manager", permissions: ["payments"] }, "payments"), false);
+  assert.equal(canReceive({ role: "admin", permissions: ["expenses"] }, "expenses"), false);
+  assert.equal(canReceive({ role: "accountant", permissions: [] }, "advances"), true);
+  assert.equal(canReceive({ role: "super_admin", permissions: [] }, "payments"), true);
   assert.equal(canReceive({ role: "admin", permissions: [] }, "payments"), false);
 });

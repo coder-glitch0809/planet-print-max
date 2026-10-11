@@ -16,9 +16,13 @@ function accountPermissions(user) {
 
 const ROLE_NAMES = { worker: "Montajnik", designer: "Dizayner", manager: "Menejer", accountant: "Buxgalter", admin: "Admin", super_admin: "Superadmin", viewer: "Kuzatuvchi", client: "Mijoz" };
 // Xabar turi qaysi bo'lim ruxsatiga bog'liq.
-const CATEGORY_PERMISSION = { approved_designs: "designs", announcements: "settings", advances: "expenses" };
+const CATEGORY_PERMISSION = { approved_designs: "designs", announcements: "settings" };
 // Lavozimning o'zi yetarli bo'lgan xabarlar: buxgalter pul harakatini, dizayner o'lchovlarni doim oladi.
 const ROLE_CATEGORIES = { accountant: ["projects", "payments", "expenses", "advances"], designer: ["measurements"] };
+// Pulga oid xabarlar (loyiha summasi, to'lov, xarajat, avans) faqat buxgalter va superadminga boradi:
+// boshqa lavozimlarga bo'lim ruxsati bo'lsa ham yuborilmaydi.
+const MONEY_CATEGORIES = ["projects", "payments", "expenses", "advances"];
+const MONEY_ROLES = ["accountant", "super_admin"];
 const CATEGORY_LABELS = {
   projects: "yangi loyihalar, baholanishi, avansi va yakunlanishi",
   payments: "mijoz to'lovlari",
@@ -35,10 +39,12 @@ const EXPENSE_LABELS = {
 const EXPENSE_PAYMENT_LABELS = { naqd: "Naqd", klik: "Klik", shot: "Kartadan (shot)" };
 const ADVANCE_TYPES = ["oylik_avans", "oylik_tolov", "founder_avans"];
 const CHAT_ID = /^-?\d{5,20}$/;
+const GROUP_ADMIN_ROLES = ["super_admin", "admin", "accountant", "manager"];
 const GUIDE_DIR = path.join(__dirname, "assets", "guide");
 
 function canReceive(user, category) {
   if (user.role === "client") return false;
+  if (MONEY_CATEGORIES.includes(category)) return MONEY_ROLES.includes(user.role);
   if (user.role === "super_admin") return true;
   const perms = accountPermissions(user);
   // Montajnik faqat tasdiqlangan montaj vazifasini oladi (shaxsiy avans xabari alohida, telefon orqali).
@@ -77,9 +83,20 @@ function webhookSecret() {
 function publicBase(req) {
   const configured = String(process.env.APP_PUBLIC_URL || "").trim();
   if (configured) return new URL(configured);
+  // Vercel production domenini o'zi beradi: preview manzilga webhook ulanib qolmaydi.
+  const production = String(process.env.VERCEL_PROJECT_PRODUCTION_URL || "").trim();
+  if (production) return new URL(/^https?:\/\//.test(production) ? production : `https://${production}`);
+  if (!req) throw new Error("Sayt manzili noma'lum");
   const host = String(req.get("x-forwarded-host") || req.get("host") || "").split(",")[0].trim();
   return new URL(`https://${host}`);
 }
+
+const BOT_COMMANDS = [
+  { command: "start", description: "Botga ulanish" },
+  { command: "chatid", description: "Chat ID olish" },
+  { command: "qollanma", description: "Qo'llanma" },
+  { command: "guruh", description: "Guruhni ulash (guruhda yozing)" }
+];
 
 const PRIVATE_KEYBOARD = { keyboard: [[{ text: "🆔 Chat ID olish" }, { text: "📖 Qo'llanma" }]], resize_keyboard: true, is_persistent: true };
 const CONTACT_KEYBOARD = {
@@ -118,7 +135,7 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
     }
     return {
       mediaChatId: String(stored.mediaChatId || process.env.TELEGRAM_MEDIA_CHAT_ID || "").trim(),
-      groupChatId: String(stored.groupChatId || process.env.TELEGRAM_GROUP_CHAT_ID || "").trim(),
+      groupChatId: String(stored.groupChatId || process.env.TELEGRAM_GROUP_CHAT_ID || process.env.TELEGRAM_INSTALLERS_CHAT_ID || "").trim(),
       groupTitle: String(stored.groupTitle || "")
     };
   }
@@ -166,11 +183,18 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
   async function sendText(chat_id, text, reply_markup) {
     return telegramApi("sendMessage", { chat_id, text: text.slice(0, 4000), parse_mode: "HTML", disable_web_page_preview: true, ...(reply_markup ? { reply_markup } : {}) });
   }
-  async function sendTo(chats, text, photo) {
+  async function sendTo(chats, text, photo, pin = false) {
     const list = [...chats];
-    const results = await Promise.allSettled(list.map(chat_id => photo
-      ? telegramApi("sendPhoto", { chat_id, photo, caption: text.slice(0, 1000), parse_mode: "HTML" })
-      : sendText(chat_id, text)));
+    const results = await Promise.allSettled(list.map(async chat_id => {
+      const sent = photo
+        ? await telegramApi("sendPhoto", { chat_id, photo, caption: text.slice(0, 1024), parse_mode: "HTML" })
+        : await sendText(chat_id, text);
+      // Vazifa chat tepasida qadalib turadi, ishchi esidan chiqarmaydi. Guruhda bot admin bo'lmasa, jim o'tkazib yuboriladi.
+      if (pin && sent?.message_id) {
+        await telegramApi("pinChatMessage", { chat_id, message_id: sent.message_id, disable_notification: true }).catch(() => {});
+      }
+      return sent;
+    }));
     results.filter(r => r.status === "rejected").forEach(r => console.error("Telegram send failed:", r.reason?.message));
     return { sent: results.filter(r => r.status === "fulfilled").length, failed: results.filter(r => r.status === "rejected").length };
   }
@@ -187,14 +211,14 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
   }
 
   // category: lavozim/ruxsat bo'yicha; personalPhones: shaxsiy xabar; toGroup: umumiy guruh.
-  async function deliver(category, text, fin, photo, { personalPhones = [], personalText, toGroup = false } = {}) {
+  async function deliver(category, text, fin, photo, { personalPhones = [], personalText, toGroup = false, pin = false } = {}) {
     const ctx = await context(fin);
     const roleSet = category ? roleChats(ctx, category) : new Set();
     // Ishchi o'zi ham buxgalter bo'lsa, bitta xabar yetadi.
     const personal = [...phoneChats(ctx, personalPhones)].filter(chat => !roleSet.has(chat));
     const groupChat = toGroup && ctx.cfg.groupChatId && !roleSet.has(ctx.cfg.groupChatId) ? ctx.cfg.groupChatId : "";
-    const main = await sendTo(new Set([...roleSet, ...(personalText ? [] : personal), ...(groupChat ? [groupChat] : [])]), text, photo);
-    const own = personalText && personal.length ? await sendTo(new Set(personal), personalText, photo) : { sent: 0, failed: 0 };
+    const main = await sendTo(new Set([...roleSet, ...(personalText ? [] : personal), ...(groupChat ? [groupChat] : [])]), text, photo, pin);
+    const own = personalText && personal.length ? await sendTo(new Set(personal), personalText, photo, pin) : { sent: 0, failed: 0 };
     return { sent: main.sent + own.sent, failed: main.failed + own.failed, group: !!groupChat };
   }
 
@@ -222,10 +246,10 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
         "• Dizayner — o'lchovlar (rasm bilan) va dizayn bo'limi", "• Montajnik — tasdiqlangan dizayn, o'lcham va vazifa",
         "• Ishchi / ta'sischi — o'ziga berilgan avans haqida shaxsiy xabar");
     }
-    lines.push("", "<b>3. Guruh (superadmin uchun)</b>",
+    lines.push("", "<b>3. Guruh</b>",
       "• Botni ishchilar guruhiga qo'shing.",
-      "• Guruhda /guruh yozing — guruh ulanadi (faqat botga ulangan superadmin).",
-      "• Guruhga tasdiqlangan dizaynlar va yangi o'lchovlar keladi. Guruh ID'sini /chatid bilan ko'rish mumkin.");
+      "• Guruhda /guruh yozing — guruh ulanadi (botga ulangan superadmin, admin, buxgalter yoki menejer).",
+      "• Guruhga tasdiqlangan dizaynlar va yangi o'lchovlar keladi. To'lov va xarajatlar guruhga bormaydi. Guruh ID'sini /chatid bilan ko'rish mumkin.");
     return lines.join("\n");
   }
   async function sendGuide(chatId, person) {
@@ -283,10 +307,10 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
         } else if (/^\/guruh(@\w+)?(\s|$)/i.test(text)) {
           const ctx = await context();
           const person = await personForTelegramUser(message.from?.id, ctx);
-          if (person?.account?.role !== "super_admin") await reply("⛔ Guruhni faqat botga ulangan superadmin ulay oladi. Avval botga shaxsiy chatda /start bosib telefoningizni yuboring.");
+          if (!GROUP_ADMIN_ROLES.includes(person?.account?.role)) await reply("⛔ Guruhni faqat botga ulangan superadmin, admin, buxgalter yoki menejer ulay oladi. Avval botga shaxsiy chatda /start bosib, telefon raqamingizni tugma orqali yuboring.");
           else {
             await saveConfig({ groupChatId: String(chat.id), groupTitle: String(chat.title || "").slice(0, 120) });
-            await reply(`✅ <b>Guruh ulandi</b>\nEndi bu guruhga tasdiqlangan dizaynlar va yangi o'lchovlar keladi.\n🆔 <code>${h(chat.id)}</code>`);
+            await reply(`✅ <b>Guruh ulandi</b>\nUlagan: ${h(person.account.username)}\nEndi bu guruhga tasdiqlangan dizaynlar (rasm, o'lcham, zakaz, vazifa) va yangi o'lchovlar keladi.\n💰 To'lov va xarajatlar guruhga yuborilmaydi — ular faqat buxgalterga boradi.\n🆔 <code>${h(chat.id)}</code>`);
           }
         }
         return res.json({ ok: true });
@@ -332,8 +356,18 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
         const ctx = await context();
         const person = await personForTelegramUser(message.from.id, ctx);
         const who = person?.account ? `${h(person.account.username)} (${h(ROLE_NAMES[person.account.role] || person.account.role)})` : person?.staff ? `${h(person.staff.name)} (${h(person.staff.title)})` : "";
-        await reply(`🆔 Sizning Chat ID: <code>${h(chat.id)}</code>\n${person ? `✅ Hisobingiz bog'langan: ${who}.` : "Dasturdagi hisobingizga bog'lanish uchun pastdagi <b>📱 Telefon raqamni yuborish</b> tugmasini bosing."}`,
+        await reply(`👋 <b>Planet Print boti</b>\n🆔 Sizning Chat ID: <code>${h(chat.id)}</code>\n${person ? `✅ Hisobingiz bog'langan: ${who}.` : "Dasturdagi hisobingizga bog'lanish uchun pastdagi <b>📱 Telefon raqamni yuborish</b> tugmasini bosing."}`,
           person ? PRIVATE_KEYBOARD : CONTACT_KEYBOARD);
+      } else if (/^\/guruh(@\w+)?(\s|$)/i.test(text)) {
+        await reply("ℹ️ /guruh buyrug'i shaxsiy chatda emas, <b>guruhning o'zida</b> yoziladi:\n1. Botni ishchilar guruhiga qo'shing.\n2. Shu guruhda /guruh deb yozing.\n\nBuni botga telefoni ulangan superadmin, admin, buxgalter yoki menejer qila oladi.");
+      } else if (/^\+?[\d\s()-]{9,16}$/.test(text.trim())) {
+        await reply("📱 Raqamni yozib emas, pastdagi <b>📱 Telefon raqamni yuborish</b> tugmasi orqali yuboring — shunda raqam haqiqatan sizniki ekani tasdiqlanadi.", CONTACT_KEYBOARD);
+      } else {
+        const ctx = await context();
+        const person = await personForTelegramUser(message.from.id, ctx);
+        await reply(person
+          ? "Men faqat bildirishnoma yuboraman. Buyruqlar: /start, /qollanma, /chatid. Guruhni ulash uchun guruhda /guruh yozing."
+          : "Botdan foydalanish uchun pastdagi <b>📱 Telefon raqamni yuborish</b> tugmasini bosing.", person ? PRIVATE_KEYBOARD : CONTACT_KEYBOARD);
       }
       res.json({ ok: true });
     } catch (error) {
@@ -377,17 +411,40 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
       const secret = webhookSecret();
       if (base.protocol !== "https:" || /^(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(base.hostname)) throw new Error("Bot faqat ochiq HTTPS manzilda ishlaydi. Saytni hostingdan (masalan Vercel) oching yoki APP_PUBLIC_URL kiriting.");
       if (!/^[A-Za-z0-9_-]{1,256}$/.test(secret)) throw new Error("TELEGRAM_WEBHOOK_SECRET faqat harf, raqam, _ va - dan iborat bo'lsin (yoki uni o'chirib qo'ying — avtomatik yaratiladi).");
-      const url = new URL("/api/telegram/webhook", base).href;
-      await telegramApi("setWebhook", { url, secret_token: secret, allowed_updates: ["message", "my_chat_member"], drop_pending_updates: false });
-      await telegramApi("setMyCommands", { commands: [
-        { command: "start", description: "Botga ulanish" },
-        { command: "chatid", description: "Chat ID olish" },
-        { command: "qollanma", description: "Qo'llanma" },
-        { command: "guruh", description: "Guruhni ulash (superadmin, guruhda)" }
-      ] }).catch(() => {});
+      const url = await installWebhook(base);
       res.json({ ok: true, url });
     } catch (error) { res.status(400).json({ error: error.message }); }
   });
+
+  async function installWebhook(base) {
+    const url = new URL("/api/telegram/webhook", base).href;
+    await telegramApi("setWebhook", { url, secret_token: webhookSecret(), allowed_updates: ["message", "my_chat_member"], drop_pending_updates: false });
+    await telegramApi("setMyCommands", { commands: BOT_COMMANDS }).catch(() => {});
+    return url;
+  }
+
+  // Har bir server ishga tushganda webhook to'g'ri manzilda ekanini tekshiradi va kerak bo'lsa tiklaydi.
+  // Shu sababli bot "Botni ulash" tugmasi bosilmasa ham ishlaydi va webhook o'chib qolsa o'zi tuzaladi.
+  let webhookCheck = null;
+  function ensureWebhook(req) {
+    if (webhookCheck || !process.env.TELEGRAM_BOT_TOKEN) return webhookCheck;
+    let base;
+    try { base = publicBase(req); } catch { return null; }
+    if (base.protocol !== "https:" || /^(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(base.hostname)) return null;
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(webhookSecret())) return null;
+    webhookCheck = (async () => {
+      const expected = new URL("/api/telegram/webhook", base).href;
+      const info = await telegramApi("getWebhookInfo", {});
+      if (info.url !== expected) {
+        await installWebhook(base);
+        console.log("Telegram webhook o'rnatildi:", expected);
+      }
+    })().catch(error => {
+      console.error("Telegram webhook tekshiruvi:", error.message);
+      webhookCheck = null;
+    });
+    return webhookCheck;
+  }
   app.get("/api/telegram/status", authRequired, superAdminRequired, async (req, res) => {
     const cfg = await config().catch(() => ({ mediaChatId: "", groupChatId: "", groupTitle: "" }));
     const result = { token: !!process.env.TELEGRAM_BOT_TOKEN, ...cfg, guideImages: guideFiles().length };
@@ -549,7 +606,8 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
       `📍 Manzil: ${h(m.address || "-")}`,
       `👷 Xodim: ${h(m.workerName || "-")} · 📅 ${h(m.date || "-")}`,
       `📏 O'lchamlar: <b>${h(m.dimensions || "kiritilmagan")}</b>`,
-      m.note ? `📝 ${h(m.note)}` : ""
+      m.note ? `📝 ${h(m.note)}` : "",
+      actor ? `✍️ Kiritdi: ${h(actor)}` : ""
     ].filter(Boolean).join("\n"), next, m.photoFileId || undefined, { toGroup: true })]));
 
     if (jobs.length > 25) {
@@ -568,7 +626,7 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
     }
     return [...new Set(warnings)];
   }
-  return { deliver, notifyChanges, finance, storageChat, escape: h, money };
+  return { deliver, notifyChanges, finance, storageChat, ensureWebhook, escape: h, money };
 }
 
 module.exports = { normalizePhone, canReceive, completionTiming, createTelegramStaff };
