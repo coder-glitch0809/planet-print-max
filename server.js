@@ -914,26 +914,14 @@ app.post("/api/telegram/send-design", authRequired, async (req, res) => {
     const project = finance.projects.find(item => item.id === design.projectId);
     if (!project) return res.status(400).json({ error: "Dizayn zakazi topilmadi." });
     const e = telegramStaff.escape;
-    const approvedAt = design.approvedAt ? new Date(design.approvedAt) : null;
-    const approvedWhen = approvedAt && !Number.isNaN(approvedAt.getTime())
-      ? new Intl.DateTimeFormat("uz-UZ", { timeZone: "Asia/Tashkent", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(approvedAt)
-      : "";
-    const measurement = finance.measurements.filter(item => item.projectId === project.id).at(-1);
-    const caption = [
-      "🎨 <b>TASDIQLANGAN DIZAYN — MONTAJ VAZIFASI</b>",
-      "",
-      `📌 Zakaz: <b>${e(project.name)}</b>`,
-      project.client ? `👤 Mijoz: ${e(project.client)}` : null,
-      measurement?.address ? `📍 Manzil: ${e(measurement.address)}` : null,
-      `📏 O'lcham: <b>${e(dimensions)}</b>`,
-      `🛠 Bajariladigan ish: ${e(instruction)}`,
-      project.dueDate ? `📅 Topshirish muddati: <b>${e(project.dueDate)}</b>` : null,
-      "",
-      `✅ Dizaynni tasdiqladi: <b>${e(design.approvedBy || req.user.username)}</b>${approvedWhen ? ` (${e(approvedWhen)})` : ""}`,
-      `📤 Yubordi: <b>${e(req.user.username)}</b>`,
-      "",
-      "❗ Rasmdagi dizaynni ko'rsatilgan o'lchamda tayyorlab, shu zakazga o'rnating. Bu xabar chat tepasida qadalib turadi."
-    ].filter(line => line !== null).join("\n");
+    // Superadmin yuborganda "kim yubordi" qatori ko'rsatilmaydi; boshqa xodim yuborsa — ko'rsatiladi.
+    const fields = [
+      req.user.role === "super_admin" ? null : `Kim tomonidan jo'natildi: <b>${e(req.user.username)}</b>`,
+      `Zakaz: <b>${e(project.name)}</b>${project.client ? ` — ${e(project.client)}` : ""}`,
+      `O'lcham (razmer): <b>${e(dimensions)}</b>`,
+      `Ishchilarga izoh: ${e(instruction)}`
+    ].filter(Boolean);
+    const caption = ["🎨 <b>TASDIQLANGAN DIZAYN</b>", "", ...fields.map((line, i) => `${["1️⃣", "2️⃣", "3️⃣", "4️⃣"][i]} ${line}`)].join("\n");
     // Montajnik va dizaynerga (lavozim/ruxsat bo'yicha) shaxsan hamda umumiy guruhga yuboriladi.
     const delivery = await telegramStaff.deliver("approved_designs", caption, finance, fileId, { toGroup: true, pin: true });
     if (!delivery.sent) throw new Error("Dizayn yuborilmadi: botga ulangan montajnik yoki guruh yo'q. Montajnik telefoni, Telegram bog'lanishi, Dizaynlar ruxsati yoki Sozlamalar → Telegram guruhini tekshiring.");
