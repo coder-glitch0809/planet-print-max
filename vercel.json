@@ -4,13 +4,23 @@
     {
       "src": "server.js",
       "use": "@vercel/node",
-      "config": { "includeFiles": ["assets/**"] }
+      "config": {
+        "includeFiles": [
+          "assets/**"
+        ]
+      }
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
       "dest": "server.js"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/deadlines",
+      "schedule": "0 4 * * *"
     }
   ]
 }

@@ -761,6 +761,9 @@ app.use("/api", async (req, res, next) => {
   // Bot webhooki serverning har bir ishga tushishida bir marta tekshiriladi (o'chib qolsa o'zi tiklanadi).
   const webhook = telegramStaff.ensureWebhook(req);
   if (webhook) await withTimeout(webhook, 8000, "webhook check timeout").catch(() => {});
+  // Muddati yaqin zakazlar eslatmasi: kuniga bir marta, cron ishlamasa ham.
+  const reminders = req.path === "/telegram/webhook" ? null : telegramStaff.ensureDeadlineReminders();
+  if (reminders) await withTimeout(reminders, 8000, "deadline reminders timeout").catch(() => {});
   next();
 });
 
@@ -936,6 +939,15 @@ app.post("/api/telegram/send-design", authRequired, async (req, res) => {
     console.error("Approved design Telegram delivery failed:", err.message);
     res.status(502).json({ error: err.message || "Dizayn foydalanuvchilarga yuborilmadi." });
   }
+});
+
+// Vercel Cron har kuni chaqiradi (vercel.json). CRON_SECRET berilgan bo'lsa, faqat Vercel chaqira oladi.
+// Takroriy chaqiruv xavfsiz: eslatma kuniga bir martadan ortiq yuborilmaydi.
+app.get("/api/cron/deadlines", async (req, res) => {
+  const secret = String(process.env.CRON_SECRET || "");
+  if (secret && req.get("authorization") !== `Bearer ${secret}`) return res.sendStatus(401);
+  try { res.json({ ok: true, ...(await telegramStaff.sendDeadlineReminders()) }); }
+  catch (err) { res.status(502).json({ error: err.message }); }
 });
 
 app.get("/api/telegram/photo/:fileId", authRequired, async (req, res) => {
@@ -1195,7 +1207,8 @@ app.post("/api/payment/mark-paid", authRequired, superAdminRequired, async (req,
   } catch (err) { sendServerError(res, err, "Mark paid failed"); }
 });
 
-app.get("/api/news", authRequired, async (req, res) => {
+// Yangiliklar (faoliyat tarixi) faqat superadminga.
+app.get("/api/news", authRequired, superAdminRequired, async (req, res) => {
   let activity = [];
   try {
     if (usesMemoryStore(req)) activity = memoryStore.activity;

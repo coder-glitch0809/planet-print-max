@@ -114,18 +114,15 @@ test("finance safety: stale saves, archive protection and validation", async t =
     assert.equal(store.finance.expenses.find(e => e.id === "eb1").allocations[0].fundedByProjectId, "p1");
   });
 
-  await t.test("news shows changes only to users allowed to see that section", async () => {
+  await t.test("news is visible only to the super admin", async () => {
     const admin = await request("/api/news");
     assert.equal(admin.status, 200);
     assert.ok(admin.body.changelog.length >= 1);
     assert.ok(admin.body.activity.some(entry => entry.category === "payments" && entry.action === "added"));
     assert.ok(admin.body.activity.some(entry => entry.category === "archive" && /qarzi yopildi/.test(entry.text)));
-    const accountant = await request("/api/news", "GET", null, "acc1");
-    assert.ok(accountant.body.activity.length > 0);
-    assert.ok(accountant.body.activity.every(entry => entry.category === "payments"));
-    const designer = await request("/api/news", "GET", null, "des1");
-    assert.ok(designer.body.activity.every(entry => entry.category === "designs"));
-    assert.ok(!designer.body.activity.some(entry => /UZS/.test(entry.text)));
+    // Yangiliklar faqat superadminga: boshqa lavozimlar umuman olmaydi.
+    assert.equal((await request("/api/news", "GET", null, "acc1")).status, 403);
+    assert.equal((await request("/api/news", "GET", null, "des1")).status, 403);
   });
 
   await t.test("default super admin password no longer works", async () => {

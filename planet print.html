@@ -338,18 +338,16 @@
               <div>
                 <label for="eType">Xarajat turi</label>
                 <select id="eType" required>
-                  <option value="banner">Banner</option>
-                  <option value="arakal">Arakal</option>
-                  <option value="rezka">Rezka</option>
-                  <option value="reyka">Reyka</option>
-                  <option value="dostavka">Dostavka</option>
-                  <option value="zapravka">Zapravka</option>
-                  <option value="suv">Suv</option>
-                  <option value="boshqa">Boshqa</option>
+                  <option value="custom">Boshqa xarajat (qo'lda yozish)</option>
                   <option value="oylik_tolov">Ishchi oyligi</option>
                   <option value="oylik_avans">Oylik maosh avansi</option>
                   <option value="founder_avans">Ta'sischi avansi</option>
                 </select>
+              </div>
+              <div id="eCustomWrap">
+                <label for="eTypeCustom">Xarajat nomi</label>
+                <input id="eTypeCustom" list="eTypeSuggestions" maxlength="60" placeholder="Masalan: Banner, Dostavka, Suv" autocomplete="off" />
+                <datalist id="eTypeSuggestions"></datalist>
               </div>
               <div><label for="eAmount">Summa (UZS)</label><input id="eAmount" inputmode="decimal" required /></div>
               <div>

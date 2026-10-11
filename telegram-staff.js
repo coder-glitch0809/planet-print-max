@@ -627,7 +627,100 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
     }
     return [...new Set(warnings)];
   }
-  return { deliver, notifyChanges, finance, storageChat, ensureWebhook, escape: h, money };
+  // ---------- Muddati yaqin zakazlar: guruhga kuniga bir marta eslatma ----------
+  // Summa yuborilmaydi: guruhga pul haqidagi ma'lumot bormasligi kerak.
+  const DEADLINE_DAYS = 2;
+  const REMINDER_HOUR = 9;
+  const tashkentDate = (date = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tashkent", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+  const tashkentHour = (date = new Date()) => Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Tashkent", hour: "2-digit", hourCycle: "h23" }).format(date));
+  const formatDay = iso => iso.split("-").reverse().join(".");
+
+  function deadlineProjects(fin, today) {
+    return fin.projects
+      .filter(p => p.status !== "Yakunlangan" && /^\d{4}-\d{2}-\d{2}$/.test(String(p.dueDate || "")))
+      .map(p => ({ project: p, daysLeft: dayDiff(today, p.dueDate) }))
+      .filter(item => Number.isFinite(item.daysLeft) && item.daysLeft <= DEADLINE_DAYS)
+      .sort((a, b) => a.daysLeft - b.daysLeft);
+  }
+
+  function deadlineText(fin, items, today) {
+    const blocks = items.map(({ project, daysLeft }, index) => {
+      const design = fin.designs.filter(d => d.projectId === project.id && d.approved).at(-1);
+      const measurement = fin.measurements.filter(m => m.projectId === project.id).at(-1);
+      const when = daysLeft < 0 ? `❗ <b>${-daysLeft} kun kechikdi</b>` : daysLeft === 0 ? "🔥 <b>bugun</b>" : daysLeft === 1 ? "⚠️ <b>ertaga</b>" : `${daysLeft} kun qoldi`;
+      return [
+        `${index + 1}. <b>${h(project.name)}</b>${project.client ? ` — ${h(project.client)}` : ""}`,
+        `📅 Muddat: ${h(formatDay(project.dueDate))} (${when})`,
+        project.status ? `⚙️ Holat: ${h(project.status)}` : "",
+        design?.dimensions || measurement?.dimensions ? `📏 O'lcham: ${h(design?.dimensions || measurement.dimensions)}` : "",
+        measurement?.address ? `📍 Manzil: ${h(measurement.address)}` : "",
+        design?.note ? `📝 Izoh: ${h(design.note)}` : ""
+      ].filter(Boolean).join("\n");
+    });
+    return [`⏰ <b>Muddati yaqin zakazlar</b> (${formatDay(today)})`, ...blocks];
+  }
+
+  // Bir kunda faqat bir marta yuboriladi: sana bazada band qilinadi (bir nechta server nusxasi bo'lsa ham).
+  async function claimReminderDay(today) {
+    const db = getFirestore();
+    if (!db) {
+      if (memoryStore.deadlineReminderDate === today) return false;
+      memoryStore.deadlineReminderDate = today;
+      return true;
+    }
+    const ref = db.collection("settings").doc("telegram");
+    return db.runTransaction(async tx => {
+      const doc = await tx.get(ref);
+      if (doc.exists && doc.data().deadlineReminderDate === today) return false;
+      tx.set(ref, { deadlineReminderDate: today }, { merge: true });
+      return true;
+    });
+  }
+
+  async function sendDeadlineReminders({ now = new Date(), force = false } = {}) {
+    if (!process.env.TELEGRAM_BOT_TOKEN) return { sent: 0, reason: "token" };
+    if (!force && tashkentHour(now) < REMINDER_HOUR) return { sent: 0, reason: "early" };
+    const today = tashkentDate(now);
+    const [fin, cfg] = await Promise.all([finance(), config()]);
+    if (!cfg.groupChatId) return { sent: 0, reason: "no-group" };
+    const items = deadlineProjects(fin, today);
+    if (!items.length) return { sent: 0, reason: "none" };
+    if (!force && !(await claimReminderDay(today))) return { sent: 0, reason: "already" };
+    // Telegram xabari 4000 belgidan oshmasin: zakazlar bo'yicha bo'lib yuboriladi.
+    const [title, ...blocks] = deadlineText(fin, items, today);
+    const messages = [];
+    let current = title;
+    for (const block of blocks) {
+      if (`${current}\n\n${block}`.length > 3900) { messages.push(current); current = block; }
+      else current = `${current}\n\n${block}`;
+    }
+    messages.push(current);
+    try {
+      for (const text of messages) await sendText(cfg.groupChatId, text);
+    } catch (error) {
+      // Yuborilmasa, kun bandligi bekor qilinadi: keyingi so'rovda qayta urinadi.
+      const db = getFirestore();
+      if (db) await db.collection("settings").doc("telegram").set({ deadlineReminderDate: "" }, { merge: true }).catch(() => {});
+      else memoryStore.deadlineReminderDate = "";
+      throw error;
+    }
+    return { sent: items.length };
+  }
+
+  // Kuniga bir marta (soat 9:00 dan keyin) birinchi so'rovda ishga tushadi; Vercel cron ham shu funksiyani chaqiradi.
+  let reminderCheckedOn = "";
+  function ensureDeadlineReminders() {
+    const now = new Date();
+    const today = tashkentDate(now);
+    if (reminderCheckedOn === today || tashkentHour(now) < REMINDER_HOUR || !process.env.TELEGRAM_BOT_TOKEN) return null;
+    reminderCheckedOn = today;
+    return sendDeadlineReminders({ now }).catch(error => {
+      reminderCheckedOn = "";
+      console.error("Deadline reminders failed:", error.message);
+    });
+  }
+
+  return { deliver, notifyChanges, finance, storageChat, ensureWebhook, sendDeadlineReminders, ensureDeadlineReminders, deadlineProjects, escape: h, money };
 }
 
 module.exports = { normalizePhone, canReceive, completionTiming, createTelegramStaff };

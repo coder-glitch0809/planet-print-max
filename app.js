@@ -15,7 +15,12 @@
       oylik_tolov: "Ishchi oyligi",
       founder_avans: "Ta'sischi avansi"
     };
-    const REAL_EXPENSE_TYPES = ["banner", "arakal", "rezka", "reyka", "dostavka", "zapravka", "suv", "boshqa", "oylik_tolov", "oylik_avans"];
+    // Xarajat turi: ishchi oyligi/avansi va ta'sischi avansi tanlanadi, qolganlari qo'lda yoziladi (type = yozilgan nom).
+    // Eski yozuvlardagi "banner", "suv" kabi kalitlar EXPENSE_LABEL orqali nomlanadi.
+    const SELECTABLE_EXPENSE_TYPES = ["oylik_tolov", "oylik_avans", "founder_avans"];
+    const expenseTypeLabel = type => EXPENSE_LABEL[type] || String(type || "-");
+    // Ta'sischi avansi xarajat emas: u ulushdan ayriladi.
+    const isRealExpense = expense => expense.type !== "founder_avans";
     const EXPENSE_PAYMENT_LABEL = {
       naqd: "Naqd",
       klik: "Klik",
@@ -151,7 +156,8 @@
       founderCalcList: document.getElementById("founderCalcList"),
 
       expenseForm: document.getElementById("expenseForm"),
-      eDate: document.getElementById("eDate"), eType: document.getElementById("eType"), eAmount: document.getElementById("eAmount"),
+      eDate: document.getElementById("eDate"), eType: document.getElementById("eType"),
+      eCustomWrap: document.getElementById("eCustomWrap"), eTypeCustom: document.getElementById("eTypeCustom"), eTypeSuggestions: document.getElementById("eTypeSuggestions"), eAmount: document.getElementById("eAmount"),
       ePaymentType: document.getElementById("ePaymentType"), eNote: document.getElementById("eNote"),
       eWorkerWrap: document.getElementById("eWorkerWrap"), eWorkerId: document.getElementById("eWorkerId"),
       eFounderWrap: document.getElementById("eFounderWrap"), eFounderId: document.getElementById("eFounderId"),
@@ -428,7 +434,8 @@
           : page === "designs" ? hasPerm("designs") || canEditProjects() : hasPerm(page));
       if (!isClientUser() && !visible.includes("archive") && (isSuperAdmin() || hasPerm("dashboard") || hasPerm("projects") || hasPerm("expenses"))) visible.splice(Math.max(visible.length - 1, 0), 0, "archive");
       if (state.currentUser.role === "super_admin") visible.splice(visible.length - 1, 0, "users");
-      if (!isClientUser()) visible.splice(Math.min(1, visible.length), 0, "news");
+      // Yangiliklar faqat superadminga ko'rinadi.
+      if (isSuperAdmin()) visible.splice(Math.min(1, visible.length), 0, "news");
       el.tabs.innerHTML = visible.map((p, i) => `<button class="tab ${i === 0 ? "active" : ""}" data-page="${p}">${pageTitle(p)}${p === "news" ? `<span id="newsBadge" class="tab-badge hidden"></span>` : ""}</button>`).join("");
       el.pages.forEach((x) => x.classList.remove("active"));
       if (visible[0]) document.getElementById(visible[0]).classList.add("active");
@@ -543,7 +550,7 @@
       state.finance.expenses.forEach((e) => {
         if (EXPENSE_PAYMENT_LABEL[e.paymentType]) expensePaymentByType[e.paymentType] = (expensePaymentByType[e.paymentType] || 0) + num(e.amount);
       });
-      const explicitExpense = roundMoney(REAL_EXPENSE_TYPES.reduce((a, t) => a + (expenseByType[t] || 0), 0));
+      const explicitExpense = roundMoney(state.finance.expenses.filter(isRealExpense).reduce((a, e) => a + num(e.amount), 0));
       // Ishchilarga shu oy hali to'lanmagan oylik ham majburiyat: u ta'sischilarga bo'linmasligi kerak.
       const totalRealExpenses = roundMoney(manualOther + tax + reserve + explicitExpense + salaryPayableNow);
 
@@ -938,6 +945,14 @@
     const isPersonExpense = () => PERSON_EXPENSE_TYPES.includes(el.eType.value);
     function toggleExpenseTypeInputs() {
       const t = el.eType.value;
+      const custom = t === "custom";
+      el.eCustomWrap.classList.toggle("hidden", !custom);
+      el.eTypeCustom.required = custom;
+      if (custom) {
+        // Avval yozilgan nomlar tavsiya sifatida chiqadi.
+        const names = [...new Set(state.finance.expenses.filter(e => !SELECTABLE_EXPENSE_TYPES.includes(e.type)).map(e => expenseTypeLabel(e.type)))].sort();
+        el.eTypeSuggestions.innerHTML = names.map(name => `<option value="${clean(name)}"></option>`).join("");
+      }
       el.eWorkerWrap.classList.toggle("hidden", t !== "oylik_avans" && t !== "oylik_tolov");
       el.eFounderWrap.classList.toggle("hidden", t !== "founder_avans");
       const title = document.getElementById("allocationTitle");
@@ -1229,7 +1244,10 @@
       Array.from(el.expensesBody.querySelectorAll("[data-edit-e]")).forEach((b) => b.addEventListener("click", () => {
         const e = state.finance.expenses.find(x => x.id === b.getAttribute("data-edit-e")); if (!e) return;
         editState.expenseId = e.id;
-        el.eDate.value = e.date; el.eType.value = e.type; el.eAmount.value = e.amount; el.ePaymentType.value = e.paymentType || "naqd"; el.eNote.value = e.note || "";
+        const selectable = SELECTABLE_EXPENSE_TYPES.includes(e.type);
+        el.eType.value = selectable ? e.type : "custom";
+        el.eTypeCustom.value = selectable ? "" : expenseTypeLabel(e.type);
+        el.eDate.value = e.date; el.eAmount.value = e.amount; el.ePaymentType.value = e.paymentType || "naqd"; el.eNote.value = e.note || "";
         fillExpenseRelatedSelects(); renderAllocationRows(expenseAllocations(e)); toggleExpenseTypeInputs();
         if (e.workerId) el.eWorkerId.value = e.workerId;
         if (e.founderId) el.eFounderId.value = e.founderId;
@@ -1815,9 +1833,17 @@
         { label: "Aralash", value: byType["Aralash"] || 0, color: c.s4 }
       ]);
       // Barcha xarajat turlari (avval "Boshqa" va "Ishchi oyligi" diagrammada yo'q edi).
-      const expenseTotal = REAL_EXPENSE_TYPES.reduce((a, t) => a + (s.expenseByType[t] || 0), 0);
-      const expenseItems = REAL_EXPENSE_TYPES
-        .map(type => ({ label: EXPENSE_LABEL[type], value: roundMoney(s.expenseByType[type] || 0) }))
+      // Qo'lda yozilgan turlar ham kiradi; bir xil nomlilar (masalan eski "banner" va yangi "Banner") birlashadi.
+      const expenseByLabel = new Map();
+      Object.entries(s.expenseByType).filter(([type]) => type !== "founder_avans").forEach(([type, value]) => {
+        const label = expenseTypeLabel(type);
+        const key = label.trim().toLowerCase();
+        const item = expenseByLabel.get(key) || { label, value: 0 };
+        item.value = roundMoney(item.value + value);
+        expenseByLabel.set(key, item);
+      });
+      const expenseTotal = roundMoney([...expenseByLabel.values()].reduce((a, item) => a + item.value, 0));
+      const expenseItems = [...expenseByLabel.values()]
         .filter(item => item.value > 0)
         .sort((a, b) => b.value - a.value);
       drawHBars(el.expenseChart, expenseItems, {
@@ -1926,7 +1952,7 @@
       }).join("") : '<li class="news-empty">Hozircha o\'zgarish qayd etilmagan.</li>';
     }
     async function loadNews() {
-      if (!state.currentUser || isClientUser()) return;
+      if (!state.currentUser || !isSuperAdmin()) return;
       try {
         const data = await apiRequest("/api/news");
         state.news = { changelog: Array.isArray(data.changelog) ? data.changelog : [], activity: Array.isArray(data.activity) ? data.activity : [] };
@@ -2444,7 +2470,7 @@
         const rec = {
           id: editState.expenseId || uid(),
           date: el.eDate.value || today(),
-          type: clean(el.eType.value),
+          type: el.eType.value === "custom" ? clean(el.eTypeCustom.value).trim().slice(0, 60) : clean(el.eType.value),
           amount: expenseAmount,
           paymentType: clean(el.ePaymentType.value),
           note: clean(el.eNote.value),
@@ -2452,6 +2478,7 @@
           founderId: null,
           allocations
         };
+        if (!rec.type || rec.type === "custom") return msg(el.expenseMsg, "Xarajat nomini yozing.", "err");
         if (!rec.date || rec.amount <= 0) return msg(el.expenseMsg, "Sana va summa to'g'ri bo'lsin.", "err");
         if (!EXPENSE_PAYMENT_LABEL[rec.paymentType]) return msg(el.expenseMsg, "To'lov turini tanlang.", "err");
         if (rec.type === "oylik_avans" || rec.type === "oylik_tolov") {

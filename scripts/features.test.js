@@ -249,3 +249,52 @@ test("Telegram role and section policy", () => {
   assert.equal(canReceive({ role: "super_admin", permissions: [] }, "payments"), true);
   assert.equal(canReceive({ role: "admin", permissions: [] }, "payments"), false);
 });
+
+test("deadline reminders go to the group once a day, without money", async () => {
+  const { createTelegramStaff } = require("../telegram-staff");
+  const previous = process.env.TELEGRAM_BOT_TOKEN;
+  process.env.TELEGRAM_BOT_TOKEN = "fake-test-token";
+  try {
+    const calls = [];
+    const memoryStore = {
+      users: [],
+      telegramConfig: { groupChatId: "-100200300" },
+      finance: {
+        projects: [
+          { id: "p1", name: "Banner", client: "Lavanda", dueDate: "2026-10-12", status: "Jarayonda", amount: 5000000 },
+          { id: "p2", name: "Viveska", client: "Oqtepa", dueDate: "2026-10-09", status: "Yangi", amount: 900000 },
+          { id: "p3", name: "Uzoq", client: "X", dueDate: "2026-11-30", status: "Yangi" },
+          { id: "p4", name: "Tayyor", client: "Y", dueDate: "2026-10-11", status: "Yakunlangan" }
+        ],
+        designs: [{ id: "d1", projectId: "p1", approved: true, dimensions: "200x300", note: "Oynakga yopishtiriladi" }],
+        measurements: [{ id: "m1", projectId: "p1", address: "Chilonzor 5" }],
+        workers: [], founders: [], expenses: [], payments: []
+      }
+    };
+    const staff = createTelegramStaff({
+      app: { post() {}, get() {}, delete() {}, put() {} }, authRequired() {}, superAdminRequired() {},
+      telegramApi: async (method, body) => { calls.push({ method, ...body }); return { message_id: calls.length }; },
+      getFirestore: () => null, memoryStore, normalizeFinance: fin => fin
+    });
+    const now = new Date("2026-10-11T06:00:00Z"); // Toshkent vaqti 11:00
+    assert.equal((await staff.sendDeadlineReminders({ now })).sent, 2);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].chat_id, "-100200300");
+    const text = calls[0].text;
+    assert.match(text, /Banner<\/b> — Lavanda/);
+    assert.match(text, /ertaga/);
+    assert.match(text, /200x300/);
+    assert.match(text, /Oynakga yopishtiriladi/);
+    assert.match(text, /Chilonzor 5/);
+    assert.match(text, /2 kun kechikdi/);
+    assert.doesNotMatch(text, /Uzoq|Tayyor/);
+    assert.doesNotMatch(text, /UZS|5000000|900000/);
+    // Shu kuni ikkinchi marta yuborilmaydi.
+    assert.equal((await staff.sendDeadlineReminders({ now })).reason, "already");
+    // Soat 9:00 gacha yuborilmaydi.
+    assert.equal((await staff.sendDeadlineReminders({ now: new Date("2026-10-12T02:00:00Z") })).reason, "early");
+    assert.equal(calls.length, 1);
+  } finally {
+    if (previous === undefined) delete process.env.TELEGRAM_BOT_TOKEN; else process.env.TELEGRAM_BOT_TOKEN = previous;
+  }
+});
