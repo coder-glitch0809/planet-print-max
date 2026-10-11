@@ -131,6 +131,24 @@ async function initDb() {
       console.error(`${key} parse xatosi:`, err.message);
     }
   }
+
+  // Kalit Vercel'ga uchta alohida o'zgaruvchi qilib qo'yilgan bo'lishi ham mumkin.
+  const splitKeys = ["FIREBASE_PROJECT_ID", "FIREBASE_CLIENT_EMAIL", "FIREBASE_PRIVATE_KEY"];
+  if (!serviceAccount && splitKeys.some((key) => process.env[key])) {
+    const unquote = (value) => String(value || "").trim().replace(/^(["'])([\s\S]*)\1$/, "$2").trim();
+    const missing = splitKeys.filter((key) => !unquote(process.env[key]));
+    if (missing.length) {
+      firebaseConfigProblems.push(`${missing.join(", ")} bo'sh`);
+    } else {
+      serviceAccount = normalizeServiceAccount({
+        type: "service_account",
+        project_id: unquote(process.env.FIREBASE_PROJECT_ID),
+        client_email: unquote(process.env.FIREBASE_CLIENT_EMAIL),
+        private_key: unquote(process.env.FIREBASE_PRIVATE_KEY)
+      });
+      console.log("Firebase loaded from FIREBASE_PROJECT_ID / FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY");
+    }
+  }
   
   // 2. Agar ENV bo'lmasa, fayldan qidirish (Local dev uchun)
   if (!serviceAccount) {
