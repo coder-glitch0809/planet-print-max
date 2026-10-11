@@ -915,13 +915,14 @@ app.post("/api/telegram/send-design", authRequired, async (req, res) => {
     if (!project) return res.status(400).json({ error: "Dizayn zakazi topilmadi." });
     const e = telegramStaff.escape;
     // Superadmin yuborganda "kim yubordi" qatori ko'rsatilmaydi; boshqa xodim yuborsa — ko'rsatiladi.
+    // Faqat qiymatlar, sarlavhasiz: 1. zakaz  2. o'lcham  3. ishchilarga izoh.
     const fields = [
-      req.user.role === "super_admin" ? null : `Kim tomonidan jo'natildi: <b>${e(req.user.username)}</b>`,
-      `Zakaz: <b>${e(project.name)}</b>${project.client ? ` — ${e(project.client)}` : ""}`,
-      `O'lcham (razmer): <b>${e(dimensions)}</b>`,
-      `Ishchilarga izoh: ${e(instruction)}`
+      req.user.role === "super_admin" ? null : `Jo'natdi: ${e(req.user.username)}`,
+      [project.name, project.client].filter(Boolean).map(e).join(" "),
+      e(dimensions),
+      e(instruction)
     ].filter(Boolean);
-    const caption = ["🎨 <b>TASDIQLANGAN DIZAYN</b>", "", ...fields.map((line, i) => `${["1️⃣", "2️⃣", "3️⃣", "4️⃣"][i]} ${line}`)].join("\n");
+    const caption = fields.map((line, i) => `${i + 1}. ${line}`).join("\n");
     // Montajnik va dizaynerga (lavozim/ruxsat bo'yicha) shaxsan hamda umumiy guruhga yuboriladi.
     const delivery = await telegramStaff.deliver("approved_designs", caption, finance, fileId, { toGroup: true, pin: true });
     if (!delivery.sent) throw new Error("Dizayn yuborilmadi: botga ulangan montajnik yoki guruh yo'q. Montajnik telefoni, Telegram bog'lanishi, Dizaynlar ruxsati yoki Sozlamalar → Telegram guruhini tekshiring.");

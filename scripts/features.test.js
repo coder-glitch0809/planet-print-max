@@ -135,10 +135,8 @@ test("permissions, MAX-equivalent payment and Telegram staff registration", asyn
     assert.equal(designMessage.photo, "fake-photo-id");
     assert.match(designMessage.caption, /200 x 100 sm, 2 dona/);
     assert.match(designMessage.caption, /Fasadga ornatish/);
-    assert.match(designMessage.caption, /Zakaz: <b>Banner<\/b>/);
-    assert.match(designMessage.caption, /1️⃣ Zakaz/);
-    // Superadmin yuborganda kim yuborgani ko'rsatilmaydi.
-    assert.doesNotMatch(designMessage.caption, /Kim tomonidan/);
+    // Superadmin yuborganda kim yuborgani ko'rsatilmaydi; sarlavhalarsiz faqat qiymatlar.
+    assert.equal(designMessage.caption, "1. Banner\n2. 200 x 100 sm, 2 dona\n3. Fasadga ornatish");
     // Vazifa montajnik chatida qadalib turadi.
     assert.deepEqual(sent.at(-1), { chat_id: "456", message_id: before + 1, disable_notification: true });
     assert.equal(sent.length, before + 2);
