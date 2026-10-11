@@ -292,7 +292,7 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
     try {
       const member = req.body?.my_chat_member;
       if (member && ["group", "supergroup"].includes(member.chat?.type) && ["member", "administrator"].includes(member.new_chat_member?.status)) {
-        await sendText(member.chat.id, `👋 Planet Print boti guruhga qo'shildi.\n🆔 Guruh Chat ID: <code>${h(member.chat.id)}</code>\n\nGuruhni ulash uchun botga ulangan superadmin shu guruhda /guruh yozsin.`);
+        await sendText(member.chat.id, "👋 Planet Print boti guruhga qo'shildi. Ulash uchun /start yozing.");
         return res.json({ ok: true });
       }
       const message = req.body?.message;
@@ -302,15 +302,16 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
       const reply = (body, markup) => sendText(chat.id, body, markup);
 
       if (chat.type === "group" || chat.type === "supergroup") {
-        if (/^\/(chatid|id|start)(@\w+)?(\s|$)/i.test(text) || /chat id olish/i.test(text)) {
-          await reply(`🆔 Guruh Chat ID: <code>${h(chat.id)}</code>\nGuruhni ulash: superadmin /guruh yozsin.`);
-        } else if (/^\/guruh(@\w+)?(\s|$)/i.test(text)) {
+        if (/^\/(chatid|id)(@\w+)?(\s|$)/i.test(text) || /chat id olish/i.test(text)) {
+          await reply(`🆔 Guruh Chat ID: <code>${h(chat.id)}</code>`);
+        } else if (/^\/(start|guruh)(@\w+)?(\s|$)/i.test(text)) {
+          // Guruhda shaxsiy ma'lumot (ism, lavozim, chat ID) chiqarilmaydi — faqat qisqa javob.
           const ctx = await context();
           const person = await personForTelegramUser(message.from?.id, ctx);
-          if (!GROUP_ADMIN_ROLES.includes(person?.account?.role)) await reply("⛔ Guruhni faqat botga ulangan superadmin, admin, buxgalter yoki menejer ulay oladi. Avval botga shaxsiy chatda /start bosib, telefon raqamingizni tugma orqali yuboring.");
+          if (!GROUP_ADMIN_ROLES.includes(person?.account?.role)) await reply("⛔ Guruhni ulash uchun avval botga shaxsiy chatda /start bosib, telefon raqamingizni yuboring.");
           else {
             await saveConfig({ groupChatId: String(chat.id), groupTitle: String(chat.title || "").slice(0, 120) });
-            await reply(`✅ <b>Guruh ulandi</b>\nUlagan: ${h(person.account.username)}\nEndi bu guruhga tasdiqlangan dizaynlar (rasm, o'lcham, zakaz, vazifa) va yangi o'lchovlar keladi.\n💰 To'lov va xarajatlar guruhga yuborilmaydi — ular faqat buxgalterga boradi.\n🆔 <code>${h(chat.id)}</code>`);
+            await reply("✅ Guruh ulandi");
           }
         }
         return res.json({ ok: true });
