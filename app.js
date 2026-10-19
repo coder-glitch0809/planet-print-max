@@ -277,6 +277,8 @@
       state.finance.payments = Array.isArray(saved.payments) ? saved.payments : [];
       state.finance.workers = Array.isArray(saved.workers) ? saved.workers : [];
       state.finance.founders = Array.isArray(saved.founders) ? saved.founders : [];
+      // Ta'sischilar bo'limi ruxsati bo'lmasa ham xarajat kirituvchi ta'sischiga avans yoza oladi (faqat ismlar).
+      state.finance.founderOptions = Array.isArray(saved.founderOptions) ? saved.founderOptions : [];
       state.finance.expenses = Array.isArray(saved.expenses) ? saved.expenses : [];
       state.finance.archives = Array.isArray(saved.archives) ? saved.archives : [];
       state.finance.measurements = Array.isArray(saved.measurements) ? saved.measurements : [];
@@ -935,9 +937,10 @@
       render();
       if (previous && Array.from(select.options).some(option => option.value === previous)) select.value = previous;
     }
+    const founderChoices = () => state.finance.founders.length ? state.finance.founders : (state.finance.founderOptions || []);
     function fillExpenseRelatedSelects() {
       keepValue(el.eWorkerId, () => { el.eWorkerId.innerHTML = state.finance.workers.map(w => `<option value="${clean(w.id)}">${clean(w.name)} (${clean(w.role)})</option>`).join(""); });
-      keepValue(el.eFounderId, () => { el.eFounderId.innerHTML = state.finance.founders.map(f => `<option value="${clean(f.id)}">${clean(f.name)}</option>`).join(""); });
+      keepValue(el.eFounderId, () => { el.eFounderId.innerHTML = founderChoices().map(f => `<option value="${clean(f.id)}">${clean(f.name)}</option>`).join(""); });
       renderAllocationRows();
     }
     // Ishchi avansi/oyligi va ta'sischi avansida zakaz tanlash ixtiyoriy.
@@ -1164,7 +1167,7 @@
 
     function renderOrderExpenseSummary() {
       const flows = orderFlows();
-      const founderName = id => state.finance.founders.find(f => f.id === id)?.name || "Noma'lum ta'sischi";
+      const founderName = id => founderChoices().find(f => f.id === id)?.name || "Noma'lum ta'sischi";
       const advanceText = map => Array.from(map, ([id, amount]) => `${clean(founderName(id))}: <span class="nowrap">${fmt(amount)}</span>`).join("<br>");
       const nameOf = id => clean(flows.rows.find(r => r.id === id)?.name || knownProjectName(id));
       const borrowNode = document.getElementById("orderBorrowings");
@@ -2261,6 +2264,15 @@
           msg(status, `Qo'llanma yuborildi: ${result.sent} ta. Yuborilmadi: ${result.failed}.`, result.failed || !result.sent ? "warn" : "ok");
         } catch (error) { msg(status, error.message, "err"); }
       });
+      document.getElementById("telegramReportBtn").addEventListener("click", async () => {
+        const status = document.getElementById("telegramStaffStatus");
+        if (!confirm("O'tgan hafta hisoboti buxgalter va superadminga Telegram orqali yuborilsinmi?")) return;
+        msg(status, "Yuborilmoqda...", "warn");
+        try {
+          const result = await apiRequest("/api/telegram/weekly-report", { method: "POST", body: "{}" });
+          msg(status, `Haftalik hisobot (${result.from} – ${result.to}) yuborildi: ${result.sent} ta xabar.${result.failed ? ` Yuborilmadi: ${result.failed}.` : ""}`, result.failed ? "warn" : "ok");
+        } catch (error) { msg(status, error.message, "err"); }
+      });
       document.getElementById("telegramConfigSave").addEventListener("click", async () => {
         const node = document.getElementById("telegramConfigMsg");
         try {
@@ -2497,7 +2509,7 @@
         if (rec.type === "founder_avans") {
           rec.founderId = el.eFounderId.value;
           if (!rec.founderId) return msg(el.expenseMsg, "Ta'sischini tanlang.", "err");
-          rec.founderName = state.finance.founders.find(founder => founder.id === rec.founderId)?.name || "";
+          rec.founderName = founderChoices().find(founder => founder.id === rec.founderId)?.name || "";
         }
         await commitFinance(f => {
           if (existingExpense) {

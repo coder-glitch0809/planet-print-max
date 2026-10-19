@@ -18,16 +18,17 @@ const ROLE_NAMES = { worker: "Montajnik", designer: "Dizayner", manager: "Meneje
 // Xabar turi qaysi bo'lim ruxsatiga bog'liq.
 const CATEGORY_PERMISSION = { approved_designs: "designs", announcements: "settings" };
 // Lavozimning o'zi yetarli bo'lgan xabarlar: buxgalter pul harakatini, dizayner o'lchovlarni doim oladi.
-const ROLE_CATEGORIES = { accountant: ["projects", "payments", "expenses", "advances"], designer: ["measurements"] };
+const ROLE_CATEGORIES = { accountant: ["projects", "payments", "expenses", "advances", "weekly_report"], designer: ["measurements"] };
 // Pulga oid xabarlar (loyiha summasi, to'lov, xarajat, avans) faqat buxgalter va superadminga boradi:
 // boshqa lavozimlarga bo'lim ruxsati bo'lsa ham yuborilmaydi.
-const MONEY_CATEGORIES = ["projects", "payments", "expenses", "advances"];
+const MONEY_CATEGORIES = ["projects", "payments", "expenses", "advances", "weekly_report"];
 const MONEY_ROLES = ["accountant", "super_admin"];
 const CATEGORY_LABELS = {
   projects: "yangi loyihalar, baholanishi, avansi va yakunlanishi",
   payments: "mijoz to'lovlari",
   expenses: "xarajatlar",
   advances: "ishchi va ta'sischi avanslari, oyliklar",
+  weekly_report: "haftalik hisobot (har dushanba) va /hisobot buyrug'i",
   measurements: "o'lchovlar (rasm bilan)",
   approved_designs: "tasdiqlangan dizayn, o'lcham va montaj vazifasi",
   announcements: "e'lonlar"
@@ -72,6 +73,171 @@ function completionTiming(project) {
   return "o'z vaqtida";
 }
 
+const shiftDay = (iso, days) => new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+const fmtDay = iso => String(iso || "").slice(0, 10).split("-").reverse().join(".");
+const day = value => String(value || "").slice(0, 10);
+const sum = (rows, pick = r => r.amount) => rows.reduce((a, r) => a + num(pick(r)), 0);
+const debtOf = project => Math.max(num(project.amount) - num(project.advance), 0);
+const percent = (part, whole) => whole > 0 ? Math.round(part / whole * 100) : 0;
+
+// Joriy oy va arxivdagi yozuvlar birga: hafta oy chegarasidan o'tsa ham to'liq hisoblanadi.
+// Bir xil id bo'lsa joriy (yangi) yozuv olinadi.
+function allRows(fin, key) {
+  const seen = new Set();
+  const rows = [];
+  [fin, ...(Array.isArray(fin.archives) ? fin.archives : [])].forEach(source =>
+    (Array.isArray(source?.[key]) ? source[key] : []).forEach(row => {
+      if (!row || seen.has(String(row.id))) return;
+      seen.add(String(row.id));
+      rows.push(row);
+    }));
+  return rows;
+}
+
+function listLines(items, render, max = 12) {
+  const lines = items.slice(0, max).map((item, i) => `${i + 1}. ${render(item)}`);
+  if (items.length > max) lines.push(`… va yana ${items.length - max} ta`);
+  return lines;
+}
+
+function changeText(now, before) {
+  if (!before) return now ? " (o'tgan hafta: 0)" : "";
+  const diff = percent(now - before, before);
+  return ` (o'tgan haftaga nisbatan ${diff > 0 ? "+" : ""}${diff}%)`;
+}
+
+// Haftalik hisobot matni (bir yoki bir nechta Telegram xabari). Faqat pul ko'rishga ruxsati borlarga.
+function weeklyReportText(fin, { from, to, today }) {
+  const inRange = (value, a = from, b = to) => { const d = day(value); return !!d && d >= a && d <= b; };
+  const prevFrom = shiftDay(from, -7), prevTo = shiftDay(from, -1);
+  const projects = allRows(fin, "projects");
+  const payments = allRows(fin, "payments");
+  const expenses = allRows(fin, "expenses");
+  const projectName = p => `<b>${h(p.name || "-")}</b>${p.client ? ` — ${h(p.client)}` : ""}`;
+
+  // --- Loyihalar ---
+  const done = p => p.status === "Yakunlangan";
+  const weekProjects = projects.filter(p => (!day(p.startDate) || day(p.startDate) <= to) && (!done(p) || !day(p.completedAt) || day(p.completedAt) >= from));
+  const completed = weekProjects.filter(p => done(p) && inRange(p.completedAt));
+  const waiting = weekProjects.filter(p => !completed.includes(p));
+  const newProjects = projects.filter(p => inRange(p.startDate));
+  const open = fin.projects.filter(p => !done(p));
+  const overdue = open.filter(p => day(p.dueDate) && day(p.dueDate) < today).sort((a, b) => day(a.dueDate).localeCompare(day(b.dueDate)));
+  const dueSoon = open.filter(p => inRange(p.dueDate, today, shiftDay(today, 7))).sort((a, b) => day(a.dueDate).localeCompare(day(b.dueDate)));
+  const lateDone = completed.filter(p => day(p.dueDate) && day(p.completedAt) > day(p.dueDate));
+
+  const projectSection = [
+    "📁 <b>LOYIHALAR</b>",
+    `• Hafta davomidagi umumiy loyihalar: <b>${weekProjects.length} ta</b> (${money(sum(weekProjects))})`,
+    `• Bajarildi (yakunlandi): <b>${completed.length} ta</b> (${money(sum(completed))})`,
+    `• Bajarilmadi / kutilmoqda: <b>${waiting.length} ta</b> (${money(sum(waiting))})`,
+    `• Yangi qabul qilingan zakazlar: <b>${newProjects.length} ta</b> (${money(sum(newProjects))})`,
+    `• Muddati o'tgan (hozir): <b>${overdue.length} ta</b>`
+  ];
+  if (completed.length) projectSection.push("", "✅ <b>Bajarilgan ishlar:</b>", ...listLines(completed, p => {
+    const timing = completionTiming(p);
+    return `${projectName(p)} · ${money(p.amount)}${timing ? ` · ${timing}` : ""}`;
+  }));
+  if (waiting.length) projectSection.push("", "⏳ <b>Bajarilmagan ishlar:</b>", ...listLines(waiting, p => {
+    const due = day(p.dueDate);
+    const state = !due ? "muddat yo'q" : due < today ? `❗ ${dayDiff(due, today)} kun kechikdi` : `muddat ${fmtDay(due)}`;
+    return `${projectName(p)} · ${h(p.status || "Yangi")} · ${state}`;
+  }));
+
+  // --- Pul ---
+  const weekPayments = payments.filter(p => inRange(p.date));
+  const prevPayments = payments.filter(p => inRange(p.date, prevFrom, prevTo));
+  const income = sum(weekPayments);
+  const prevIncome = sum(prevPayments);
+  const byPayType = {};
+  weekPayments.forEach(p => { const k = p.paymentType || "Boshqa"; byPayType[k] = (byPayType[k] || 0) + num(p.amount); });
+  const paidProjectIds = new Set(weekPayments.map(p => p.projectId));
+  const paidOff = projects.filter(p => paidProjectIds.has(p.id) && num(p.amount) > 0 && debtOf(p) === 0);
+  const partlyPaid = projects.filter(p => paidProjectIds.has(p.id) && debtOf(p) > 0);
+
+  const weekExpenses = expenses.filter(e => inRange(e.date));
+  const prevExpenses = expenses.filter(e => inRange(e.date, prevFrom, prevTo));
+  const realOf = rows => rows.filter(e => !ADVANCE_TYPES.includes(e.type));
+  const salaryOf = rows => rows.filter(e => e.type === "oylik_avans" || e.type === "oylik_tolov");
+  const real = realOf(weekExpenses);
+  const realTotal = sum(real);
+  const salaryTotal = sum(salaryOf(weekExpenses));
+  const founderRows = weekExpenses.filter(e => e.type === "founder_avans");
+  const founderTotal = sum(founderRows);
+  const spent = realTotal + salaryTotal;
+  const prevSpent = sum(realOf(prevExpenses)) + sum(salaryOf(prevExpenses));
+  const net = income - spent;
+  const byType = {};
+  real.forEach(e => { const k = EXPENSE_LABELS[e.type] || e.type || "Boshqa"; byType[k] = (byType[k] || 0) + num(e.amount); });
+  const typeRows = Object.entries(byType).sort((a, b) => b[1] - a[1]);
+
+  const moneySection = [
+    "💰 <b>PUL HARAKATI</b>",
+    `• Tushum (mijozlardan): <b>${money(income)}</b> — ${weekPayments.length} ta to'lov${changeText(income, prevIncome)}`,
+    ...Object.entries(byPayType).map(([k, v]) => `   ◦ ${h(k)}: ${money(v)}`),
+    `• Xarajatlar: <b>${money(realTotal)}</b>`,
+    ...typeRows.slice(0, 8).map(([k, v]) => `   ◦ ${h(k)}: ${money(v)}`),
+    `• Ishchilar oyligi va avansi: <b>${money(salaryTotal)}</b>`,
+    `• Jami chiqim: <b>${money(spent)}</b>${changeText(spent, prevSpent)}`,
+    `• ${net >= 0 ? "📈 Sof daromad" : "📉 Zarar"} (tushum − chiqim): <b>${money(net)}</b>`,
+    `• Ta'sischilarga avans: <b>${money(founderTotal)}</b>`,
+    `• Kassada qolgan (avanslardan keyin): <b>${money(net - founderTotal)}</b>`
+  ];
+  if (founderRows.length) {
+    const byFounder = {};
+    founderRows.forEach(e => {
+      const name = fin.founders.find(f => f.id === e.founderId)?.name || e.founderName || "-";
+      byFounder[name] = (byFounder[name] || 0) + num(e.amount);
+    });
+    moneySection.splice(moneySection.length - 1, 0, ...Object.entries(byFounder).map(([k, v]) => `   ◦ ${h(k)}: ${money(v)}`));
+  }
+  if (paidOff.length) moneySection.push("", "💵 <b>To'liq to'langan zakazlar:</b>", ...listLines(paidOff, p => `${projectName(p)} · ${money(p.amount)}`));
+  if (partlyPaid.length) moneySection.push("", "🔸 <b>Qisman to'langan (qarzi qolgan):</b>", ...listLines(partlyPaid, p => `${projectName(p)} · qoldiq ${money(debtOf(p))}`));
+
+  // --- Qarzlar va oyliklar (hisobot paytidagi holat) ---
+  const debtors = fin.projects.filter(p => debtOf(p) > 0).sort((a, b) => debtOf(b) - debtOf(a));
+  const receivable = sum(debtors, debtOf);
+  const salaryLeft = fin.workers.reduce((a, w) => {
+    const rows = fin.expenses.filter(e => e.workerId === w.id && (e.type === "oylik_avans" || e.type === "oylik_tolov"));
+    return a + Math.max(num(w.salary) - sum(rows), 0);
+  }, 0);
+  const debtSection = [
+    "🧾 <b>QARZLAR (hozirgi holat)</b>",
+    `• Mijozlardan olinadigan qarz: <b>${money(receivable)}</b> (${debtors.length} ta zakaz)`,
+    ...listLines(debtors, p => `${projectName(p)} · ${money(debtOf(p))}`, 5),
+    `• Ishchilarga shu oy to'lanishi kerak oylik qoldig'i: <b>${money(salaryLeft)}</b>`
+  ];
+
+  // --- Tavsiyalar ---
+  const advice = [];
+  if (overdue.length) advice.push(`❗ ${overdue.length} ta zakaz muddati o'tgan (${overdue.slice(0, 5).map(p => h(p.name)).join(", ")}). Mijozlar bilan yangi muddatni kelishing va bu ishlarni birinchi navbatga qo'ying.`);
+  if (dueSoon.length) advice.push(`📅 Keyingi 7 kunda ${dueSoon.length} ta zakaz topshiriladi (${dueSoon.slice(0, 5).map(p => `${h(p.name)} — ${fmtDay(p.dueDate)}`).join(", ")}). Material, dizayn va montajni oldindan rejalang.`);
+  const doneUnpaid = debtors.filter(done);
+  if (doneUnpaid.length) advice.push(`💰 ${doneUnpaid.length} ta zakaz topshirilgan, lekin to'lanmagan: jami ${money(sum(doneUnpaid, debtOf))}. Shu qarzlarni birinchi undiring.`);
+  const noAdvance = open.filter(p => num(p.amount) > 0 && num(p.advance) === 0);
+  if (noAdvance.length) advice.push(`⚠️ ${noAdvance.length} ta zakaz avanssiz ishlanmoqda (${noAdvance.slice(0, 5).map(p => h(p.name)).join(", ")}). Ishni davom ettirishdan oldin avans oling.`);
+  if (net < 0) advice.push(`📉 Bu hafta chiqim tushumdan ${money(-net)} ga ko'p. Shoshilinch bo'lmagan xarajatlarni keyinga qoldiring va qarzlarni tezroq yig'ing.`);
+  if (founderTotal > 0 && founderTotal > Math.max(net, 0)) advice.push(`🏦 Ta'sischilarga berilgan avans (${money(founderTotal)}) haftalik sof daromaddan ko'p. Avanslarni daromadga moslang.`);
+  if (prevSpent > 0 && spent > prevSpent * 1.3) advice.push(`📊 Chiqim o'tgan haftadan ${percent(spent - prevSpent, prevSpent)}% ko'p. Sababini tekshiring.`);
+  if (prevIncome > 0 && income < prevIncome * 0.7) advice.push(`📊 Tushum o'tgan haftadan ${percent(prevIncome - income, prevIncome)}% kam. Qarzdor mijozlarga qo'ng'iroq qiling.`);
+  if (typeRows.length && realTotal > 0 && typeRows[0][1] / realTotal >= 0.4 && typeRows.length > 1) advice.push(`🔎 Eng katta xarajat — ${h(typeRows[0][0])}: ${money(typeRows[0][1])} (${percent(typeRows[0][1], realTotal)}%). Yetkazib beruvchi narxlarini solishtiring.`);
+  if (lateDone.length) advice.push(`⏱ ${lateDone.length} ta zakaz kechikib topshirildi. Yangi zakazlarga muddatni real belgilang.`);
+  if (!newProjects.length) advice.push("📣 Bu hafta yangi zakaz bo'lmadi. Eski mijozlar bilan bog'laning va reklamani kuchaytiring.");
+  if (salaryLeft > 0 && receivable + Math.max(net, 0) < salaryLeft) advice.push(`👷 Ishchilar oylik qoldig'i (${money(salaryLeft)}) kutilayotgan pullardan ko'p. Oylik uchun pulni oldindan ajrating.`);
+  if (!advice.length) advice.push("✅ Hammasi joyida: kechikkan zakaz yo'q, pul oqimi ijobiy. Shu tempni saqlang.");
+  const adviceSection = ["💡 <b>TAVSIYALAR — NIMA QILISH KERAK</b>", ...advice.map((a, i) => `${i + 1}. ${a}`)];
+
+  const header = `📊 <b>Haftalik hisobot</b>\n📅 ${fmtDay(from)} – ${fmtDay(to)}`;
+  const messages = [];
+  let current = header;
+  for (const section of [projectSection, moneySection, debtSection, adviceSection].map(s => s.join("\n"))) {
+    if (`${current}\n\n${section}`.length > 3900) { messages.push(current); current = section.slice(0, 3900); }
+    else current = `${current}\n\n${section}`;
+  }
+  messages.push(current);
+  return messages;
+}
+
 function webhookSecret() {
   const configured = String(process.env.TELEGRAM_WEBHOOK_SECRET || "").trim();
   if (configured) return configured;
@@ -95,6 +261,7 @@ const BOT_COMMANDS = [
   { command: "start", description: "Botga ulanish" },
   { command: "chatid", description: "Chat ID olish" },
   { command: "qollanma", description: "Qo'llanma" },
+  { command: "hisobot", description: "Haftalik hisobot (buxgalter, superadmin)" },
   { command: "guruh", description: "Guruhni ulash (guruhda yozing)" }
 ];
 
@@ -242,7 +409,7 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
     } else if (person?.staff) {
       lines.push(`Siz: <b>${h(person.staff.name)}</b> (${h(person.staff.title)})`, "• Sizga berilgan avans, oylik va ta'sischi avansi haqida shaxsiy xabar");
     } else {
-      lines.push("• Superadmin — hammasi", "• Buxgalter — loyihalar, to'lovlar, xarajatlar, avanslar",
+      lines.push("• Superadmin — hammasi", "• Buxgalter — loyihalar, to'lovlar, xarajatlar, avanslar, har dushanba haftalik hisobot (/hisobot)",
         "• Dizayner — o'lchovlar (rasm bilan) va dizayn bo'limi", "• Montajnik — tasdiqlangan dizayn, o'lcham va vazifa",
         "• Ishchi / ta'sischi — o'ziga berilgan avans haqida shaxsiy xabar");
     }
@@ -359,6 +526,17 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
         const who = person?.account ? `${h(person.account.username)} (${h(ROLE_NAMES[person.account.role] || person.account.role)})` : person?.staff ? `${h(person.staff.name)} (${h(person.staff.title)})` : "";
         await reply(`👋 <b>Planet Print boti</b>\n🆔 Sizning Chat ID: <code>${h(chat.id)}</code>\n${person ? `✅ Hisobingiz bog'langan: ${who}.` : "Dasturdagi hisobingizga bog'lanish uchun pastdagi <b>📱 Telefon raqamni yuborish</b> tugmasini bosing."}`,
           person ? PRIVATE_KEYBOARD : CONTACT_KEYBOARD);
+      } else if (/^\/hisobot(@\w+)?(\s|$)/i.test(text)) {
+        // Pul ma'lumoti: faqat buxgalter va superadminga, faqat shaxsiy chatda.
+        const ctx = await context();
+        const person = await personForTelegramUser(message.from.id, ctx);
+        if (!person?.account || !canReceive(person.account, "weekly_report")) {
+          await reply("⛔ Hisobot faqat buxgalter va superadmin uchun.", person ? PRIVATE_KEYBOARD : CONTACT_KEYBOARD);
+        } else {
+          const previous = /o.?tgan|oldingi/i.test(text);
+          await sendWeeklyReport({ chatId: chat.id, current: !previous });
+          if (!previous) await reply("ℹ️ Bu joriy hafta (dushanbadan bugungacha). O'tgan to'liq hafta uchun: <code>/hisobot otgan</code>");
+        }
       } else if (/^\/guruh(@\w+)?(\s|$)/i.test(text)) {
         await reply("ℹ️ /guruh buyrug'i shaxsiy chatda emas, <b>guruhning o'zida</b> yoziladi:\n1. Botni ishchilar guruhiga qo'shing.\n2. Shu guruhda /guruh deb yozing.\n\nBuni botga telefoni ulangan superadmin, admin, buxgalter yoki menejer qila oladi.");
       } else if (/^\+?[\d\s()-]{9,16}$/.test(text.trim())) {
@@ -439,6 +617,9 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
       if (info.url !== expected) {
         await installWebhook(base);
         console.log("Telegram webhook o'rnatildi:", expected);
+      } else {
+        // Yangi buyruqlar (masalan /hisobot) bot menyusida ko'rinsin.
+        await telegramApi("setMyCommands", { commands: BOT_COMMANDS }).catch(() => {});
       }
     })().catch(error => {
       console.error("Telegram webhook tekshiruvi:", error.message);
@@ -720,7 +901,89 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
     });
   }
 
-  return { deliver, notifyChanges, finance, storageChat, ensureWebhook, sendDeadlineReminders, ensureDeadlineReminders, deadlineProjects, escape: h, money };
+  // ---------- Haftalik hisobot: buxgalter va superadminga ----------
+  // Har dushanba soat 9:00 dan keyin o'tgan hafta (dushanba–yakshanba) uchun bir marta yuboriladi.
+  function weekKey(now) {
+    const today = tashkentDate(now);
+    const weekday = (new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7; // dushanba = 0
+    return shiftDay(today, -weekday);
+  }
+
+  async function claimReportWeek(week) {
+    const db = getFirestore();
+    if (!db) {
+      if (memoryStore.weeklyReportWeek === week) return false;
+      memoryStore.weeklyReportWeek = week;
+      return true;
+    }
+    const ref = db.collection("settings").doc("telegram");
+    return db.runTransaction(async tx => {
+      const doc = await tx.get(ref);
+      if (doc.exists && doc.data().weeklyReportWeek === week) return false;
+      tx.set(ref, { weeklyReportWeek: week }, { merge: true });
+      return true;
+    });
+  }
+
+  async function deliverReport(messages, fin, chatId) {
+    let sent = 0, failed = 0;
+    for (const text of messages) {
+      if (chatId) { await sendText(chatId, text); sent++; continue; }
+      const result = await deliver("weekly_report", text, fin);
+      sent += result.sent; failed += result.failed;
+    }
+    return { sent, failed };
+  }
+
+  // force: kun/soatni tekshirmasdan (superadmin tugmasi); current: joriy hafta bugungacha (/hisobot buyrug'i).
+  async function sendWeeklyReport({ now = new Date(), force = false, current = false, chatId = "" } = {}) {
+    if (!process.env.TELEGRAM_BOT_TOKEN) return { sent: 0, reason: "token" };
+    const monday = weekKey(now);
+    const today = tashkentDate(now);
+    const auto = !force && !current && !chatId;
+    if (auto && (today !== monday || tashkentHour(now) < REMINDER_HOUR)) return { sent: 0, reason: "not-monday" };
+    const range = current ? { from: monday, to: today } : { from: shiftDay(monday, -7), to: shiftDay(monday, -1) };
+    const fin = await finance();
+    const messages = weeklyReportText(fin, { ...range, today });
+    if (auto && !(await claimReportWeek(monday))) return { sent: 0, reason: "already" };
+    try {
+      const result = await deliverReport(messages, fin, chatId);
+      // Qabul qiluvchi yo'q bo'lsa, hafta band qolaveradi: har so'rovda qayta urinilmaydi.
+      if (auto && !result.sent && !result.failed) return { ...result, ...range, reason: "no-recipients" };
+      if (auto && !result.sent) throw new Error("Haftalik hisobot Telegramga yuborilmadi.");
+      return { ...result, ...range };
+    } catch (error) {
+      if (auto) {
+        const db = getFirestore();
+        if (db) await db.collection("settings").doc("telegram").set({ weeklyReportWeek: "" }, { merge: true }).catch(() => {});
+        else memoryStore.weeklyReportWeek = "";
+      }
+      throw error;
+    }
+  }
+
+  let reportCheckedWeek = "";
+  function ensureWeeklyReport() {
+    const now = new Date();
+    const monday = weekKey(now);
+    if (reportCheckedWeek === monday || tashkentDate(now) !== monday || tashkentHour(now) < REMINDER_HOUR || !process.env.TELEGRAM_BOT_TOKEN) return null;
+    reportCheckedWeek = monday;
+    return sendWeeklyReport({ now }).catch(error => {
+      reportCheckedWeek = "";
+      console.error("Weekly report failed:", error.message);
+    });
+  }
+
+  app.post("/api/telegram/weekly-report", authRequired, superAdminRequired, async (req, res) => {
+    try {
+      const result = await sendWeeklyReport({ force: true, current: req.body?.period === "current" });
+      if (!result.sent) return res.status(400).json({ error: "Hisobot yuborilmadi: botga ulangan buxgalter yoki superadmin yo'q. Buxgalter botda /start bosib telefonini yuborsin." });
+      res.json({ ok: true, ...result });
+    } catch (error) { res.status(502).json({ error: error.message || "Hisobot yuborilmadi." }); }
+  });
+
+  return { deliver, notifyChanges, finance, storageChat, ensureWebhook, sendDeadlineReminders, ensureDeadlineReminders,
+    sendWeeklyReport, ensureWeeklyReport, deadlineProjects, escape: h, money };
 }
 
-module.exports = { normalizePhone, canReceive, completionTiming, createTelegramStaff };
+module.exports = { normalizePhone, canReceive, completionTiming, weeklyReportText, createTelegramStaff };

@@ -2,6 +2,17 @@
 // Yangi o'zgarish kiritilganda ro'yxat BOSHIGA yangi yozuv qo'shing (eng yangisi birinchi).
 module.exports = [
   {
+    version: "2026.10.19",
+    date: "2026-10-19",
+    title: "Haftalik hisobot va ta'sischiga avans (admin)",
+    items: [
+      "Har dushanba soat 9:00 dan keyin buxgalter va superadminga Telegram orqali o'tgan hafta hisoboti: umumiy, bajarilgan va kutilayotgan loyihalar, tushum, xarajatlar, sof daromad, ta'sischi avanslari, to'langan zakazlar, qarzlar va tavsiyalar.",
+      "Botda /hisobot — joriy hafta, /hisobot otgan — o'tgan to'liq hafta (faqat buxgalter va superadmin).",
+      "Sozlamalar → Telegram bot: «Haftalik hisobotni hozir yuborish» tugmasi.",
+      "Xarajat kirituvchi admin Ta'sischilar bo'limi ruxsati bo'lmasa ham Xarajatlar formasida ta'sischiga avans yoza oladi (ta'sischi foizlari yashirin qoladi)."
+    ]
+  },
+  {
     version: "2026.10.11",
     date: "2026-10-11",
     title: "Avanslar, loyihani yakunlash va Telegram xabarlari",

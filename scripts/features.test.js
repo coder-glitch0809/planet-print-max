@@ -298,3 +298,45 @@ test("deadline reminders go to the group once a day, without money", async () =>
     if (previous === undefined) delete process.env.TELEGRAM_BOT_TOKEN; else process.env.TELEGRAM_BOT_TOKEN = previous;
   }
 });
+
+test("weekly report for the accountant: projects, money, debts and advice", () => {
+  const { weeklyReportText, canReceive } = require("../telegram-staff");
+  assert.equal(canReceive({ role: "accountant", permissions: [] }, "weekly_report"), true);
+  assert.equal(canReceive({ role: "admin", permissions: ["reports", "expenses"] }, "weekly_report"), false);
+  assert.equal(canReceive({ role: "worker", permissions: ["designs"] }, "weekly_report"), false);
+  const fin = {
+    projects: [
+      { id: "p1", name: "Banner", client: "Lavanda", amount: 1000000, advance: 1000000, startDate: "2026-10-05", dueDate: "2026-10-10", status: "Yakunlangan", completedAt: "2026-10-09" },
+      { id: "p2", name: "Viveska", client: "Oqtepa", amount: 2000000, advance: 0, startDate: "2026-10-06", dueDate: "2026-10-15", status: "Jarayonda" },
+      { id: "p3", name: "Kelajak", client: "Z", amount: 500000, advance: 100000, startDate: "2026-10-25", dueDate: "2026-10-30", status: "Yangi" }
+    ],
+    payments: [
+      { id: "pay1", projectId: "p1", amount: 600000, date: "2026-10-07", paymentType: "Naqd" },
+      { id: "pay3", projectId: "p3", amount: 100000, date: "2026-10-20" }
+    ],
+    expenses: [
+      { id: "e1", type: "banner", amount: 300000, date: "2026-10-08" },
+      { id: "e2", type: "founder_avans", founderId: "f1", amount: 200000, date: "2026-10-10" },
+      { id: "e3", type: "oylik_avans", workerId: "w1", amount: 100000, date: "2026-10-11" }
+    ],
+    workers: [{ id: "w1", name: "Ali", salary: 1000000 }],
+    founders: [{ id: "f1", name: "Jasur", share: 50 }],
+    // Hafta oy chegarasidan o'tsa: arxivdagi to'lov ham hisobga kiradi.
+    archives: [{ id: "archive-2026-09", month: "2026-09", payments: [{ id: "pay0", projectId: "p1", amount: 400000, date: "2026-10-05" }], expenses: [], projects: [] }],
+    designs: [], measurements: []
+  };
+  const text = weeklyReportText(fin, { from: "2026-10-05", to: "2026-10-11", today: "2026-10-19" }).join("\n");
+  assert.match(text, /05\.10\.2026 – 11\.10\.2026/);
+  assert.match(text, /umumiy loyihalar: <b>2 ta<\/b>/);
+  assert.match(text, /Bajarildi \(yakunlandi\): <b>1 ta<\/b>/);
+  assert.match(text, /kutilmoqda: <b>1 ta<\/b>/);
+  assert.match(text, /Tushum \(mijozlardan\): <b>1 000 000 UZS<\/b> — 2 ta/);
+  assert.match(text, /Xarajatlar: <b>300 000 UZS/);
+  assert.match(text, /Sof daromad.*600 000 UZS/);
+  assert.match(text, /Ta'sischilarga avans: <b>200 000 UZS/);
+  assert.match(text, /Jasur: 200 000 UZS/);
+  assert.match(text, /To'liq to'langan zakazlar:[\s\S]*Banner/);
+  assert.match(text, /Viveska.*4 kun kechikdi/);
+  assert.match(text, /TAVSIYALAR[\s\S]*muddati o'tgan \(Viveska\)[\s\S]*avanssiz/);
+  assert.doesNotMatch(text, /Kelajak — Z · 500/);
+});

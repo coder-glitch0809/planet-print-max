@@ -390,6 +390,9 @@ function visibleFinanceForUser(req, finance) {
       : canAccess(req, "designs") ? full.projects.map(designerProjectView) : [],
     workers: canAccess(req, "workers") ? full.workers : [],
     founders: canAccess(req, "founders") ? full.founders : [],
+    // Xarajat kirituvchi (masalan admin) ta'sischilar bo'limini ko'rmasa ham ta'sischiga avans yoza olsin:
+    // faqat ism va id beriladi, foiz va hisob-kitob yashirin qoladi.
+    founderOptions: canAccess(req, "expenses") && !canAccess(req, "founders") ? full.founders.map(f => ({ id: f.id, name: f.name })) : [],
     expenses: canAccess(req, "expenses") || canAccess(req, "reports") ? full.expenses : [],
     payments: canAccess(req, "payments") || canAccess(req, "reports") ? full.payments : [],
     archives: canAccess(req, "dashboard") || canAccess(req, "projects") || canAccess(req, "expenses") || canAccess(req, "reports")
@@ -764,6 +767,9 @@ app.use("/api", async (req, res, next) => {
   // Muddati yaqin zakazlar eslatmasi: kuniga bir marta, cron ishlamasa ham.
   const reminders = req.path === "/telegram/webhook" ? null : telegramStaff.ensureDeadlineReminders();
   if (reminders) await withTimeout(reminders, 8000, "deadline reminders timeout").catch(() => {});
+  // Haftalik hisobot: dushanba kuni soat 9:00 dan keyingi birinchi so'rovda (cron ishlamasa ham).
+  const report = req.path === "/telegram/webhook" ? null : telegramStaff.ensureWeeklyReport();
+  if (report) await withTimeout(report, 8000, "weekly report timeout").catch(() => {});
   next();
 });
 
@@ -942,12 +948,14 @@ app.post("/api/telegram/send-design", authRequired, async (req, res) => {
 });
 
 // Vercel Cron har kuni chaqiradi (vercel.json). CRON_SECRET berilgan bo'lsa, faqat Vercel chaqira oladi.
-// Takroriy chaqiruv xavfsiz: eslatma kuniga bir martadan ortiq yuborilmaydi.
+// Takroriy chaqiruv xavfsiz: eslatma kuniga, haftalik hisobot haftasiga bir martadan ortiq yuborilmaydi.
 app.get("/api/cron/deadlines", async (req, res) => {
   const secret = String(process.env.CRON_SECRET || "");
   if (secret && req.get("authorization") !== `Bearer ${secret}`) return res.sendStatus(401);
-  try { res.json({ ok: true, ...(await telegramStaff.sendDeadlineReminders()) }); }
-  catch (err) { res.status(502).json({ error: err.message }); }
+  const [deadlines, weekly] = await Promise.allSettled([telegramStaff.sendDeadlineReminders(), telegramStaff.sendWeeklyReport()]);
+  const value = result => result.status === "fulfilled" ? result.value : { error: result.reason?.message };
+  res.status(deadlines.status === "rejected" && weekly.status === "rejected" ? 502 : 200)
+    .json({ ok: true, ...value(deadlines), weeklyReport: value(weekly) });
 });
 
 app.get("/api/telegram/photo/:fileId", authRequired, async (req, res) => {
