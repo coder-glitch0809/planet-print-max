@@ -369,12 +369,16 @@ const TOKEN_KEY = "pp_token_v1";
     function hasPerm(page) {
       if (!state.currentUser) return false;
       if (state.currentUser.role === "super_admin") return true;
+      if (page === "expenses" && ["admin", "accountant"].includes(state.currentUser.role)) return true;
 
 
       return (state.currentUser.permissions || []).includes(page);
     }
     function isSuperAdmin() {
       return state.currentUser?.role === "super_admin";
+    }
+    function founderAdvanceOnly() {
+      return ["admin", "accountant"].includes(state.currentUser?.role) && !state.currentUser.permissions.includes("expenses");
     }
     function isClientUser() {
       return state.currentUser?.role === "client";
@@ -944,6 +948,10 @@ const TOKEN_KEY = "pp_token_v1";
     const PERSON_EXPENSE_TYPES = ["oylik_avans", "oylik_tolov", "founder_avans"];
     const isPersonExpense = () => PERSON_EXPENSE_TYPES.includes(el.eType.value);
     function toggleExpenseTypeInputs() {
+      const restricted = founderAdvanceOnly();
+      Array.from(el.eType.options).forEach(option => { option.disabled = restricted && option.value !== "founder_avans"; });
+      if (restricted) el.eType.value = "founder_avans";
+      document.querySelectorAll('[data-quick-expense="oylik_avans"]').forEach(button => button.classList.toggle("hidden", restricted));
       const t = el.eType.value;
       const custom = t === "custom";
       el.eCustomWrap.classList.toggle("hidden", !custom);
@@ -1144,8 +1152,8 @@ const TOKEN_KEY = "pp_token_v1";
         return `<tr>
           <td>${clean(e.date)}</td><td>${EXPENSE_LABEL[e.type] || clean(e.type)}</td><td class="num">${fmt(e.amount)}</td><td>${paymentType}</td><td>${clean(target)}</td><td>${projectCell}${warning}</td><td>${clean(e.note || "-")}</td>
           <td>
-            <button class="ghost small-btn" type="button" data-edit-e="${clean(e.id)}">Tahrirlash</button>
-            <button class="danger small-btn" type="button" data-del-e="${clean(e.id)}">O'chirish</button>
+            ${founderAdvanceOnly() ? "-" : `<button class="ghost small-btn" type="button" data-edit-e="${clean(e.id)}">Tahrirlash</button>
+            <button class="danger small-btn" type="button" data-del-e="${clean(e.id)}">O'chirish</button>`}
           </td>
         </tr>`;
       }).join("");

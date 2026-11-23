@@ -300,3 +300,30 @@ test('monthly income follows the order month while payment dates and weekly cash
   assert.equal(rows.filter(r => r.month === '2026-11' && r.kind === 'income').reduce((sum, r) => sum + r.record.amount, 0), 100);
   assert.equal(rows.find(r => r.record.id === 'e').month, '2026-11');
 });
+
+test('admins and accountants can give founder advances without founder or expense permissions', async t => {
+  const { store, request } = await startServer(t);
+  const now = monthKey(new Date());
+  store.finance = { payment: { currentMonth: now, lastPaidMonth: now }, founders: [{ id: 'f1', name: 'Founder', share: 100 }], expenses: [{ id: 'original', type: 'custom', amount: 20 }] };
+  for (const role of ['admin', 'accountant']) {
+    store.users.push({ id: role, username: role, role, permissions: '[]' });
+    const current = await request('/api/finance', 'GET', null, role);
+    assert.equal(current.status, 200);
+    assert.equal(current.body.finance.founders.length, 0);
+    assert.deepEqual(current.body.finance.founderOptions, [{ id: 'f1', name: 'Founder' }]);
+    const finance = current.body.finance;
+    finance.expenses.push({ id: role + '-advance', type: 'founder_avans', founderId: 'f1', amount: 100, date: now + '-01', paymentType: 'naqd', allocations: [] });
+    const saved = await request('/api/finance', 'PUT', { finance, revision: current.body.revision }, role);
+    assert.equal(saved.status, 200);
+    assert.ok(store.finance.expenses.some(e => e.id === role + '-advance'));
+    assert.ok(store.finance.expenses.some(e => e.id === 'original'));
+    const fresh = await request('/api/finance', 'GET', null, role);
+    fresh.body.finance.expenses.push({ id: role + '-forbidden', type: 'custom', amount: 100 });
+    assert.equal((await request('/api/finance', 'PUT', { finance: fresh.body.finance, revision: fresh.body.revision }, role)).status, 403);
+    fresh.body.finance.expenses.pop();
+    fresh.body.finance.expenses.push({ id: role + '-invalid', type: 'founder_avans', founderId: 'missing', amount: 100, allocations: [] });
+    assert.equal((await request('/api/finance', 'PUT', { finance: fresh.body.finance, revision: fresh.body.revision }, role)).status, 400);
+  }
+  store.users.push({ id: 'viewer', username: 'viewer', role: 'viewer', permissions: '[]' });
+  assert.equal((await request('/api/finance', 'PUT', { finance: store.finance, revision: store.revision }, 'viewer')).status, 403);
+});
