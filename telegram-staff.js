@@ -75,7 +75,8 @@ function completionTiming(project) {
 
 const shiftDay = (iso, days) => new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
 const fmtDay = iso => String(iso || "").slice(0, 10).split("-").reverse().join(".");
-const day = value => String(value || "").slice(0, 10);
+const tashkentDate = (date = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tashkent", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+const day = value => !value ? "" : /^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? String(value) : Number.isFinite(Date.parse(value)) ? tashkentDate(new Date(value)) : "";
 const sum = (rows, pick = r => r.amount) => rows.reduce((a, r) => a + num(pick(r)), 0);
 const debtOf = project => Math.max(num(project.amount) - num(project.advance), 0);
 const percent = (part, whole) => whole > 0 ? Math.round(part / whole * 100) : 0;
@@ -110,20 +111,24 @@ function changeText(now, before) {
 function weeklyReportText(fin, { from, to, today }) {
   const inRange = (value, a = from, b = to) => { const d = day(value); return !!d && d >= a && d <= b; };
   const prevFrom = shiftDay(from, -7), prevTo = shiftDay(from, -1);
-  const projects = allRows(fin, "projects");
   const payments = allRows(fin, "payments");
+  // Haftadan keyingi to'lovlar tarixiy qarz holatini o'zgartirmasin.
+  const projects = allRows(fin, "projects").map(p => ({ ...p,
+    advance: Math.max(num(p.advance) - sum(payments.filter(payment => payment.projectId === p.id && day(payment.date) > to)), 0)
+  }));
   const expenses = allRows(fin, "expenses");
   const projectName = p => `<b>${h(p.name || "-")}</b>${p.client ? ` — ${h(p.client)}` : ""}`;
 
   // --- Loyihalar ---
-  const done = p => p.status === "Yakunlangan";
-  const weekProjects = projects.filter(p => (!day(p.startDate) || day(p.startDate) <= to) && (!done(p) || !day(p.completedAt) || day(p.completedAt) >= from));
+  const done = p => p.status === "Yakunlangan" && !!day(p.completedAt) && day(p.completedAt) <= to;
+  const weekProjects = projects.filter(p => inRange(p.startDate) || inRange(p.completedAt) || inRange(p.dueDate)
+    || payments.some(payment => payment.projectId === p.id && inRange(payment.date)));
   const completed = weekProjects.filter(p => done(p) && inRange(p.completedAt));
-  const waiting = weekProjects.filter(p => !completed.includes(p));
+  const waiting = weekProjects.filter(p => !done(p));
   const newProjects = projects.filter(p => inRange(p.startDate));
-  const open = fin.projects.filter(p => !done(p));
-  const overdue = open.filter(p => day(p.dueDate) && day(p.dueDate) < today).sort((a, b) => day(a.dueDate).localeCompare(day(b.dueDate)));
-  const dueSoon = open.filter(p => inRange(p.dueDate, today, shiftDay(today, 7))).sort((a, b) => day(a.dueDate).localeCompare(day(b.dueDate)));
+  const open = weekProjects.filter(p => !done(p));
+  const overdue = open.filter(p => day(p.dueDate) && day(p.dueDate) < to).sort((a, b) => day(a.dueDate).localeCompare(day(b.dueDate)));
+  const dueSoon = open.filter(p => inRange(p.dueDate)).sort((a, b) => day(a.dueDate).localeCompare(day(b.dueDate)));
   const lateDone = completed.filter(p => day(p.dueDate) && day(p.completedAt) > day(p.dueDate));
 
   const projectSection = [
@@ -132,7 +137,7 @@ function weeklyReportText(fin, { from, to, today }) {
     `• Bajarildi (yakunlandi): <b>${completed.length} ta</b> (${money(sum(completed))})`,
     `• Bajarilmadi / kutilmoqda: <b>${waiting.length} ta</b> (${money(sum(waiting))})`,
     `• Yangi qabul qilingan zakazlar: <b>${newProjects.length} ta</b> (${money(sum(newProjects))})`,
-    `• Muddati o'tgan (hozir): <b>${overdue.length} ta</b>`
+    `• Muddati o'tgan (hafta oxirida): <b>${overdue.length} ta</b>`
   ];
   if (completed.length) projectSection.push("", "✅ <b>Bajarilgan ishlar:</b>", ...listLines(completed, p => {
     const timing = completionTiming(p);
@@ -140,7 +145,7 @@ function weeklyReportText(fin, { from, to, today }) {
   }));
   if (waiting.length) projectSection.push("", "⏳ <b>Bajarilmagan ishlar:</b>", ...listLines(waiting, p => {
     const due = day(p.dueDate);
-    const state = !due ? "muddat yo'q" : due < today ? `❗ ${dayDiff(due, today)} kun kechikdi` : `muddat ${fmtDay(due)}`;
+    const state = !due ? "muddat yo'q" : due < to ? `❗ ${dayDiff(due, to)} kun kechikdi` : `muddat ${fmtDay(due)}`;
     return `${projectName(p)} · ${h(p.status || "Yangi")} · ${state}`;
   }));
 
@@ -194,24 +199,19 @@ function weeklyReportText(fin, { from, to, today }) {
   if (paidOff.length) moneySection.push("", "💵 <b>To'liq to'langan zakazlar:</b>", ...listLines(paidOff, p => `${projectName(p)} · ${money(p.amount)}`));
   if (partlyPaid.length) moneySection.push("", "🔸 <b>Qisman to'langan (qarzi qolgan):</b>", ...listLines(partlyPaid, p => `${projectName(p)} · qoldiq ${money(debtOf(p))}`));
 
-  // --- Qarzlar va oyliklar (hisobot paytidagi holat) ---
-  const debtors = fin.projects.filter(p => debtOf(p) > 0).sort((a, b) => debtOf(b) - debtOf(a));
+  // --- Haftaga tegishli zakazlarning hafta oxiridagi qarzi ---
+  const debtors = weekProjects.filter(p => debtOf(p) > 0).sort((a, b) => debtOf(b) - debtOf(a));
   const receivable = sum(debtors, debtOf);
-  const salaryLeft = fin.workers.reduce((a, w) => {
-    const rows = fin.expenses.filter(e => e.workerId === w.id && (e.type === "oylik_avans" || e.type === "oylik_tolov"));
-    return a + Math.max(num(w.salary) - sum(rows), 0);
-  }, 0);
   const debtSection = [
-    "🧾 <b>QARZLAR (hozirgi holat)</b>",
+    "🧾 <b>HAFTAGA TEGISHLI ZAKAZLAR QARZI (hafta oxirida)</b>",
     `• Mijozlardan olinadigan qarz: <b>${money(receivable)}</b> (${debtors.length} ta zakaz)`,
     ...listLines(debtors, p => `${projectName(p)} · ${money(debtOf(p))}`, 5),
-    `• Ishchilarga shu oy to'lanishi kerak oylik qoldig'i: <b>${money(salaryLeft)}</b>`
   ];
 
   // --- Tavsiyalar ---
   const advice = [];
   if (overdue.length) advice.push(`❗ ${overdue.length} ta zakaz muddati o'tgan (${overdue.slice(0, 5).map(p => h(p.name)).join(", ")}). Mijozlar bilan yangi muddatni kelishing va bu ishlarni birinchi navbatga qo'ying.`);
-  if (dueSoon.length) advice.push(`📅 Keyingi 7 kunda ${dueSoon.length} ta zakaz topshiriladi (${dueSoon.slice(0, 5).map(p => `${h(p.name)} — ${fmtDay(p.dueDate)}`).join(", ")}). Material, dizayn va montajni oldindan rejalang.`);
+  if (dueSoon.length) advice.push(`📅 Shu haftada ${dueSoon.length} ta zakaz topshiriladi (${dueSoon.slice(0, 5).map(p => `${h(p.name)} — ${fmtDay(p.dueDate)}`).join(", ")}). Material, dizayn va montajni oldindan rejalang.`);
   const doneUnpaid = debtors.filter(done);
   if (doneUnpaid.length) advice.push(`💰 ${doneUnpaid.length} ta zakaz topshirilgan, lekin to'lanmagan: jami ${money(sum(doneUnpaid, debtOf))}. Shu qarzlarni birinchi undiring.`);
   const noAdvance = open.filter(p => num(p.amount) > 0 && num(p.advance) === 0);
@@ -223,7 +223,6 @@ function weeklyReportText(fin, { from, to, today }) {
   if (typeRows.length && realTotal > 0 && typeRows[0][1] / realTotal >= 0.4 && typeRows.length > 1) advice.push(`🔎 Eng katta xarajat — ${h(typeRows[0][0])}: ${money(typeRows[0][1])} (${percent(typeRows[0][1], realTotal)}%). Yetkazib beruvchi narxlarini solishtiring.`);
   if (lateDone.length) advice.push(`⏱ ${lateDone.length} ta zakaz kechikib topshirildi. Yangi zakazlarga muddatni real belgilang.`);
   if (!newProjects.length) advice.push("📣 Bu hafta yangi zakaz bo'lmadi. Eski mijozlar bilan bog'laning va reklamani kuchaytiring.");
-  if (salaryLeft > 0 && receivable + Math.max(net, 0) < salaryLeft) advice.push(`👷 Ishchilar oylik qoldig'i (${money(salaryLeft)}) kutilayotgan pullardan ko'p. Oylik uchun pulni oldindan ajrating.`);
   if (!advice.length) advice.push("✅ Hammasi joyida: kechikkan zakaz yo'q, pul oqimi ijobiy. Shu tempni saqlang.");
   const adviceSection = ["💡 <b>TAVSIYALAR — NIMA QILISH KERAK</b>", ...advice.map((a, i) => `${i + 1}. ${a}`)];
 
@@ -812,7 +811,6 @@ function createTelegramStaff({ app, authRequired, superAdminRequired, telegramAp
   // Summa yuborilmaydi: guruhga pul haqidagi ma'lumot bormasligi kerak.
   const DEADLINE_DAYS = 2;
   const REMINDER_HOUR = 9;
-  const tashkentDate = (date = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tashkent", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
   const tashkentHour = (date = new Date()) => Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Tashkent", hour: "2-digit", hourCycle: "h23" }).format(date));
   const formatDay = iso => iso.split("-").reverse().join(".");
 

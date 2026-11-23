@@ -368,11 +368,6 @@
                 <select id="eFounderId"></select>
               </div>
             </div>
-            <div class="allocation-editor">
-              <div class="allocation-heading"><div><strong id="allocationTitle">Zakazlarga taqsimlash</strong><p id="allocationHelp" class="section-help">Xarajat summasi tanlangan zakazlarga to'liq taqsimlanishi shart. Agar xarajat bir zakaz uchun bo'lsa-yu, puli boshqa zakaz pulidan olingan bo'lsa, "Pul qaysi zakazdan olindi" maydonida o'sha zakazni tanlang.</p></div><button id="addAllocationBtn" class="ghost small-btn" type="button">+ Zakaz qo'shish</button></div>
-              <div id="expenseAllocations"></div>
-              <div id="allocationTotal" class="allocation-total"></div>
-            </div>
             <div class="actions">
               <button id="expenseSubmitBtn" type="submit">Xarajat qo'shish</button>
               <button id="expenseCancelEdit" class="ghost hidden" type="button">Tahrirni bekor qilish</button>
@@ -425,10 +420,10 @@
 
       <section id="reports" class="page">
         <div class="panel card">
-          <div class="section-heading"><div><h2 class="section-title">Moliyaviy hisobotlar</h2><p class="section-help">Arxiv va joriy davrdagi tushumlar hamda xarajatlar. Ta'sischi avansi foydani taqsimlash bo'lgani uchun xarajatga qo'shilmaydi, alohida ko'rsatiladi.</p></div></div>
+          <div class="section-heading"><div><h2 class="section-title">Moliyaviy hisobotlar</h2><p class="section-help">Faqat joriy oydagi tushumlar hamda xarajatlar. Ta'sischi avansi foydani taqsimlash bo'lgani uchun xarajatga qo'shilmaydi, alohida ko'rsatiladi.</p></div></div>
           <div class="report-toolbar">
             <div><label for="reportYear">Yil</label><select id="reportYear"></select></div>
-            <div><label for="reportMonth">Oy</label><select id="reportMonth"><option value="all">Yil bo'yicha</option></select></div>
+            <div><label for="reportMonth">Oy</label><select id="reportMonth"></select></div>
             <button id="exportReportBtn" type="button">Excelga yuklash (.csv)</button>
           </div>
           <div class="kpi-grid report-kpis" id="reportKpis"></div>

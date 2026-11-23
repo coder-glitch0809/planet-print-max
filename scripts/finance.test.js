@@ -178,14 +178,15 @@ test("Firestore mode: transaction, revision, month archive and activity log", as
   const stored = db.data.get("settings/finance");
   assert.equal(stored.revision, 1);
   assert.equal(stored.data.archives[0].month, "2020-01");
-  assert.deepEqual(stored.data.projects.map(p => [p.id, p.amount, p.advance, p.carriedFromMonth]), [["p1", 1000, 400, "2020-01"]]);
+  assert.equal(stored.data.projects.length, 0);
+  assert.equal(stored.data.archives[0].projects[0].advance, 400);
 
   const finance = first.body.finance;
-  finance.projects[0].advance = 1000;
-  finance.payments.push({ id: "x3", projectId: "p1", amount: 600 });
+  finance.projects.push({ id: "new-order", name: "New", client: "Ali", amount: 1000, advance: 600 });
+  finance.payments.push({ id: "x3", projectId: "new-order", amount: 600 });
   assert.equal((await request("/api/finance", "PUT", { finance, revision: 1 }, "u1")).status, 200);
   assert.equal(db.data.get("settings/finance").revision, 2);
-  assert.equal(db.data.get("settings/finance").data.projects[0].advance, 1000);
+  assert.equal(db.data.get("settings/finance").data.projects[0].advance, 600);
   assert.equal((await request("/api/finance", "PUT", { finance, revision: 1 }, "u1")).status, 409);
 
   const news = await request("/api/news", "GET", null, "u1");
@@ -194,7 +195,7 @@ test("Firestore mode: transaction, revision, month archive and activity log", as
   assert.ok([...db.data.keys()].some(key => key.startsWith("activityLog/")));
 });
 
-test("month rollover keeps the real contract amount of unpaid orders", async t => {
+test("month rollover archives all orders including unpaid and unfinished orders", async t => {
   const { exports } = await startServer(t);
   const finance = {
     projects: [
@@ -208,10 +209,13 @@ test("month rollover keeps the real contract amount of unpaid orders", async t =
   const next = exports.archiveOpenCycle(finance);
   assert.equal(next.archives[0].month, "2020-01");
   assert.equal(next.archives[0].payments.length, 1);
-  assert.equal(next.projects.length, 1);
-  assert.equal(next.projects[0].amount, 1000);
-  assert.equal(next.projects[0].advance, 200);
-  assert.equal(next.projects[0].carriedFromMonth, "2020-01");
+  assert.equal(next.projects.length, 0);
+  assert.equal(next.archives[0].projects.length, 2);
+  assert.equal(next.archives[0].projects[0].amount, 1000);
+  assert.equal(next.archives[0].projects[0].advance, 200);
+  assert.equal(next.archives[0].projects[0].outstandingBalance, 800);
+  assert.equal(next.archives[0].projects[0].debtClosed, false);
+  assert.equal(exports.archiveOpenCycle(next).archives.length, 1);
   assert.equal(next.payments.length, 0);
   assert.equal(next.expenses.length, 0);
 });
@@ -231,4 +235,19 @@ test("money input parsing does not silently change amounts", () => {
   assert.ok(Number.isNaN(parseMoney("12abc")));
   assert.ok(Number.isNaN(parseMoney("-500")));
   assert.ok(Number.isNaN(parseMoney("1.5.0")));
+});
+
+test('report controls always select the current Tashkent month', () => {
+  const source = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const body = source.match(/function ensureReportPeriods\(\) \{[\s\S]*?\n    \}/)[0];
+  const el = { reportYear: {}, reportMonth: {} };
+  let date = '2026-12-01';
+  const context = { el, today: () => date, ledgerRows: () => [{ month: '2025-01' }], MONTH_LABELS: Array.from({ length: 12 }, (_, i) => String(i + 1)) };
+  vm.runInNewContext(body + '; ensureReportPeriods();', context);
+  assert.equal(el.reportYear.innerHTML, '<option value="2026">2026</option>');
+  assert.equal(el.reportMonth.innerHTML, '<option value="12">12</option>');
+  date = '2027-01-01';
+  context.ensureReportPeriods();
+  assert.equal(el.reportYear.innerHTML, '<option value="2027">2027</option>');
+  assert.equal(el.reportMonth.innerHTML, '<option value="01">1</option>');
 });

@@ -301,17 +301,7 @@ function archiveOpenCycle(finance) {
     });
   }
 
-  // Qarzi qolgan zakaz keyingi oyga asl summasi va to'langan qismi bilan o'tadi.
-  // carriedFromMonth belgisi bu zakaz daromadi avvalgi oyda hisoblanganini bildiradi,
-  // shuning uchun u yangi oyning ta'sischi fondi/soliq/zaxirasiga qayta qo'shilmaydi.
-  next.projects = next.projects
-    .map((project) => {
-      const remaining = Math.max(Number(project.amount || 0) - Number(project.advance || 0), 0);
-      return remaining > 0
-        ? { ...project, carriedFromMonth: archivedMonth, originMonth: project.originMonth || archivedMonth }
-        : null;
-    })
-    .filter(Boolean);
+  next.projects = [];
   next.expenses = [];
   next.payments = [];
   next.measurements = [];
@@ -655,6 +645,7 @@ function validateNewExpenseAllocations(currentFinance, nextFinance) {
       if (owner && isMoney(expense.amount, false)) continue;
       return expense.type === "founder_avans" ? "Avans uchun ta'sischini tanlang." : "Avans yoki oylik uchun ishchini tanlang.";
     }
+    if (!allocations.length && isMoney(expense.amount, false)) continue;
     const total = allocations.reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0);
     const previous = existingById.get(String(expense.id));
     const previousProjectIds = new Set((previous?.allocations || [])
@@ -863,7 +854,7 @@ async function withFinance(req, mutate) {
     });
   }
   if (result.archived) {
-    await logActivity(req, [{ category: "archive", action: "added", text: `${result.archivedMonth} oyi arxivlandi; qarzi qolgan zakazlar yangi oyga o'tdi` }], { asSystem: true });
+    await logActivity(req, [{ category: "archive", action: "added", text: `${result.archivedMonth} oyi arxivlandi; barcha zakazlar arxivga o'tkazildi` }], { asSystem: true });
   }
   if (result.error) throw result.error;
   return result;

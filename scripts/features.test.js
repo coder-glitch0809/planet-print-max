@@ -217,10 +217,10 @@ test("permissions, MAX-equivalent payment and Telegram staff registration", asyn
     assert.ok(messages.every(m => m.photo === "meas-photo" && /3 x 2 m/.test(m.caption)));
     messages = await sentSince(f => Object.assign(f.projects[0], { status: "Yakunlangan", completedAt: "2000-01-01", dueDate: "2000-01-03" }));
     assert.match(messages.find(m => m.chat_id === "709").text, /Loyiha yakunlandi[\s\S]*muddatidan 2 kun oldin/);
-    // Zakazsiz oddiy xarajat hali ham rad etiladi; ishchisiz avans ham.
+    // Zakazsiz oddiy xarajat qabul qilinadi; ishchisiz avans rad etiladi.
     finance = (await request("/api/finance", "GET", null, "fallback-super-admin")).body.finance;
     finance.expenses.push({ id: "bad1", date: "2026-10-11", type: "banner", amount: 5, paymentType: "naqd", allocations: [] });
-    assert.equal((await request("/api/finance", "PUT", { finance }, "fallback-super-admin")).status, 400);
+    assert.equal((await request("/api/finance", "PUT", { finance }, "fallback-super-admin")).status, 200);
     finance.expenses[finance.expenses.length - 1] = { id: "bad1", date: "2026-10-11", type: "oylik_avans", amount: 5, paymentType: "naqd", workerId: "nobody", allocations: [] };
     assert.equal((await request("/api/finance", "PUT", { finance }, "fallback-super-admin")).status, 400);
     // Guruhda /chatid guruh ID sini beradi.
@@ -336,7 +336,26 @@ test("weekly report for the accountant: projects, money, debts and advice", () =
   assert.match(text, /Ta'sischilarga avans: <b>200 000 UZS/);
   assert.match(text, /Jasur: 200 000 UZS/);
   assert.match(text, /To'liq to'langan zakazlar:[\s\S]*Banner/);
-  assert.match(text, /Viveska.*4 kun kechikdi/);
-  assert.match(text, /TAVSIYALAR[\s\S]*muddati o'tgan \(Viveska\)[\s\S]*avanssiz/);
+  assert.match(text, /Viveska.*muddat 15\.10\.2026/);
+  assert.match(text, /TAVSIYALAR[\s\S]*avanssiz/);
   assert.doesNotMatch(text, /Kelajak — Z · 500/);
+});
+const { weeklyReportText } = require('../telegram-staff');
+test('weekly report excludes unrelated old and future records across a month boundary', () => {
+  const fin = {
+    projects: [
+      { id: 'old', name: 'UNRELATED_OLD', startDate: '2026-01-01', amount: 900, advance: 0 },
+      { id: 'future', name: 'UNRELATED_FUTURE', startDate: '2026-11-10', amount: 900, advance: 0 },
+      { id: 'week', name: 'WEEK_ORDER', startDate: '2026-10-30', amount: 100, advance: 100 }
+    ],
+    payments: [
+      { id: 'later', projectId: 'week', amount: 60, date: '2026-11-03' },
+      { id: 'outside', amount: 777, date: '2026-11-01T20:00:00Z' }
+    ], expenses: [], workers: [], founders: [],
+    archives: [{ month: '2026-10', payments: [{ id: 'inside', projectId: 'week', amount: 40, date: '2026-10-31' }], expenses: [] }]
+  };
+  const text = weeklyReportText(fin, { from: '2026-10-26', to: '2026-11-01', today: '2026-11-23' }).join('\n');
+  assert.doesNotMatch(text, /UNRELATED_OLD|UNRELATED_FUTURE|777 UZS/);
+  assert.match(text, /40 UZS/);
+  assert.match(text, /qoldiq 60 UZS/);
 });

@@ -1,4 +1,4 @@
-﻿const TOKEN_KEY = "pp_token_v1";
+const TOKEN_KEY = "pp_token_v1";
     const THEME_KEY = "pp_theme_v3";
     let needsSetup = false;
 
@@ -166,9 +166,6 @@
       expenseReset: document.getElementById("expenseReset"), expenseMsg: document.getElementById("expenseMsg"),
       expensesBody: document.getElementById("expensesBody"),
       orderExpensesBody: document.getElementById("orderExpensesBody"),
-      expenseAllocations: document.getElementById("expenseAllocations"),
-      addAllocationBtn: document.getElementById("addAllocationBtn"),
-      allocationTotal: document.getElementById("allocationTotal"),
       dashboardYear: document.getElementById("dashboardYear"),
       dashboardMonth: document.getElementById("dashboardMonth"),
       dashboardChartCaption: document.getElementById("dashboardChartCaption"),
@@ -372,8 +369,8 @@
     function hasPerm(page) {
       if (!state.currentUser) return false;
       if (state.currentUser.role === "super_admin") return true;
-      
-      
+
+
       return (state.currentUser.permissions || []).includes(page);
     }
     function isSuperAdmin() {
@@ -941,7 +938,7 @@
     function fillExpenseRelatedSelects() {
       keepValue(el.eWorkerId, () => { el.eWorkerId.innerHTML = state.finance.workers.map(w => `<option value="${clean(w.id)}">${clean(w.name)} (${clean(w.role)})</option>`).join(""); });
       keepValue(el.eFounderId, () => { el.eFounderId.innerHTML = founderChoices().map(f => `<option value="${clean(f.id)}">${clean(f.name)}</option>`).join(""); });
-      renderAllocationRows();
+
     }
     // Ishchi avansi/oyligi va ta'sischi avansida zakaz tanlash ixtiyoriy.
     const PERSON_EXPENSE_TYPES = ["oylik_avans", "oylik_tolov", "founder_avans"];
@@ -958,15 +955,7 @@
       }
       el.eWorkerWrap.classList.toggle("hidden", t !== "oylik_avans" && t !== "oylik_tolov");
       el.eFounderWrap.classList.toggle("hidden", t !== "founder_avans");
-      const title = document.getElementById("allocationTitle");
-      if (title) title.textContent = isPersonExpense() ? "Zakaz (ixtiyoriy) — avans ma'lum zakaz pulidan berilgan bo'lsa tanlang" : "Zakazlarga taqsimlash";
-      const help = document.getElementById("allocationHelp");
-      if (help) {
-        help.dataset.default ||= help.textContent;
-        help.textContent = isPersonExpense() ? "Zakazni bo'sh qoldirsangiz, avans umumiy hisoblanadi. Zakaz tanlasangiz, summa shu zakazlarga to'liq taqsimlanishi kerak." : help.dataset.default;
-      }
-      // Ta'sischi avansida zakaz = pul olingan zakazning o'zi, alohida "pul manbai" kerak emas.
-      renderAllocationRows();
+
     }
     // Ishchilar/Ta'sischilar jadvalidagi "Avans berish" va Xarajatlardagi tezkor tugmalar shu formani ochadi.
     function openAdvanceForm(type, personId = "") {
@@ -976,7 +965,7 @@
       toggleExpenseTypeInputs();
       if (personId && type === "founder_avans") el.eFounderId.value = personId;
       else if (personId) el.eWorkerId.value = personId;
-      renderAllocationRows([]);
+
       el.expenseForm.scrollIntoView({ behavior: "smooth", block: "start" });
       setTimeout(() => el.eAmount.focus(), 300);
       msg(el.expenseMsg, type === "founder_avans" ? "Ta'sischi avansi: summani kiriting va saqlang." : "Ishchi avansi: summani kiriting va saqlang.", "warn");
@@ -1003,83 +992,6 @@
         || "O'chirilgan zakaz";
     }
 
-    function allocationProjectOptions(selectedId = "", { placeholder = "Zakazni tanlang", allowEmpty = false } = {}) {
-      const options = state.finance.projects.map(project =>
-        `<option value="${clean(project.id)}" ${project.id === selectedId ? "selected" : ""}>${clean(project.name)}${project.client ? ` — ${clean(project.client)}` : ""}</option>`
-      );
-      if (selectedId && !state.finance.projects.some(project => project.id === selectedId)) {
-        options.unshift(`<option value="${clean(selectedId)}" selected>${clean(knownProjectName(selectedId))} (faol emas)</option>`);
-      }
-      const first = allowEmpty
-        ? `<option value="" ${selectedId ? "" : "selected"}>${placeholder}</option>`
-        : `<option value="" ${selectedId ? "" : "selected"} disabled>${placeholder}</option>`;
-      return first + options.join("");
-    }
-
-    function renderAllocationRows(allocations = null) {
-      if (!el.expenseAllocations) return;
-      const existingRows = allocations === null ? Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-row]")).map(row => ({
-        projectId: row.querySelector("[data-allocation-project]")?.value || "",
-        fundedByProjectId: row.querySelector("[data-allocation-source]")?.value || "",
-        amount: row.querySelector("[data-allocation-amount]")?.value || ""
-      })) : allocations;
-      const optional = isPersonExpense();
-      // Avansda zakaz qatori faqat "+ Zakaz qo'shish" bosilganda chiqadi; bo'sh qatorlar ko'rsatilmaydi.
-      const filled = optional ? existingRows.filter(row => row.projectId || String(row.amount || "").trim()) : existingRows;
-      const rows = filled.length ? filled : optional ? [] : [{ projectId: "", fundedByProjectId: "", amount: "" }];
-      // Avansda tanlangan zakazning o'zi pul olingan zakaz: alohida "pul manbai" maydoni kerak emas.
-      const noSource = optional;
-      el.expenseAllocations.innerHTML = rows.map((allocation, index) => `
-        <div class="allocation-row${noSource ? " no-source" : ""}" data-allocation-row>
-          <label class="allocation-select-label">${optional ? "Pul olingan zakaz" : "Xarajat qaysi zakaz uchun"} ${rows.length > 1 ? index + 1 : ""}<select data-allocation-project ${optional ? "" : "required"}>${allocationProjectOptions(allocation.projectId || "", optional ? { placeholder: "Zakazsiz (umumiy)", allowEmpty: true } : {})}</select></label>
-          <label class="allocation-source">Pul qaysi zakazdan olindi<select data-allocation-source>${allocationProjectOptions(allocation.fundedByProjectId && allocation.fundedByProjectId !== allocation.projectId ? allocation.fundedByProjectId : "", { placeholder: "Shu zakazning o'z pulidan", allowEmpty: true })}</select></label>
-          <label>Summa (UZS)<input data-allocation-amount inputmode="decimal" value="${clean(allocation.amount)}" placeholder="0" ${optional ? "" : "required"} /></label>
-          <button class="danger small-btn" type="button" data-remove-allocation aria-label="Zakaz taqsimotini o'chirish">O'chirish</button>
-        </div>`).join("");
-      updateAllocationTotal();
-    }
-
-    function updateAllocationTotal() {
-      if (!el.allocationTotal || !el.expenseAllocations) return;
-      const assigned = roundMoney(Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-amount]"))
-        .reduce((total, input) => total + (parseMoney(input.value) || 0), 0));
-      const amount = parseMoney(el.eAmount.value) || 0;
-      if (isPersonExpense() && !readExpenseAllocations().length) {
-        el.allocationTotal.textContent = "Zakazga bog'lanmagan umumiy avans — bu ham to'g'ri. Zakaz pulidan berilgan bo'lsa, zakazni tanlang.";
-        el.allocationTotal.classList.add("is-valid");
-        el.allocationTotal.classList.remove("is-invalid");
-        return;
-      }
-      const matches = amount > 0 && Math.abs(assigned - amount) < 0.01;
-      const diff = roundMoney(amount - assigned);
-      el.allocationTotal.textContent = !amount && !assigned
-        ? "Avval xarajat summasini kiriting, keyin uni zakazlarga taqsimlang."
-        : `Taqsimlangan: ${fmt(assigned)} / ${fmt(amount)}${matches ? " — to'liq" : diff > 0 ? ` — yana ${fmt(diff)} taqsimlash kerak` : ` — ${fmt(-diff)} ortiqcha taqsimlangan`}`;
-      el.allocationTotal.classList.toggle("is-valid", matches);
-      el.allocationTotal.classList.toggle("is-invalid", !matches);
-    }
-
-    function readExpenseAllocations() {
-      const optional = isPersonExpense();
-      return Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-row]")).filter(row =>
-        // Avansda bo'sh qoldirilgan qator hisobga olinmaydi.
-        !optional || row.querySelector("[data-allocation-project]").value || String(row.querySelector("[data-allocation-amount]").value).trim()
-      ).map(row => {
-        const projectId = row.querySelector("[data-allocation-project]").value;
-        // Avansda pul aynan tanlangan zakazdan olingan hisoblanadi.
-        const fundedBy = optional ? "" : (row.querySelector("[data-allocation-source]")?.value || "");
-        const allocation = {
-          projectId,
-          projectName: knownProjectName(projectId, ""),
-          amount: parseMoney(row.querySelector("[data-allocation-amount]").value)
-        };
-        if (fundedBy && fundedBy !== projectId) {
-          allocation.fundedByProjectId = fundedBy;
-          allocation.fundedByProjectName = knownProjectName(fundedBy, "");
-        }
-        return allocation;
-      });
-    }
 
     function founderAdvanceProjectDetails(founderId) {
       const grouped = new Map();
@@ -1251,7 +1163,7 @@
         el.eType.value = selectable ? e.type : "custom";
         el.eTypeCustom.value = selectable ? "" : expenseTypeLabel(e.type);
         el.eDate.value = e.date; el.eAmount.value = e.amount; el.ePaymentType.value = e.paymentType || "naqd"; el.eNote.value = e.note || "";
-        fillExpenseRelatedSelects(); renderAllocationRows(expenseAllocations(e)); toggleExpenseTypeInputs();
+        fillExpenseRelatedSelects(); toggleExpenseTypeInputs();
         if (e.workerId) el.eWorkerId.value = e.workerId;
         if (e.founderId) el.eFounderId.value = e.founderId;
         setFormEditMode(el.expenseForm, el.expenseSubmitBtn, el.expenseCancelEdit, true);
@@ -1431,15 +1343,15 @@
     }
 
     function ensureReportPeriods() {
-      const currentYear = String(new Date().getFullYear());
-      const currentMonth = String(new Date().getMonth() + 1).padStart(2, "0");
+      const currentYear = today().slice(0, 4);
+      const currentMonth = today().slice(5, 7);
       const years = new Set([currentYear]);
       ledgerRows().forEach(row => {
         if (/^\d{4}-\d{2}$/.test(row.month)) years.add(row.month.slice(0, 4));
       });
       const yearOptions = Array.from(years).sort((a, b) => b.localeCompare(a))
         .map(year => `<option value="${year}">${year}</option>`).join("");
-      [el.dashboardYear, el.reportYear].forEach(select => {
+      [el.dashboardYear].forEach(select => {
         if (!select) return;
         const selected = select.value;
         select.innerHTML = yearOptions;
@@ -1451,12 +1363,8 @@
           MONTH_LABELS.map((month, index) => `<option value="${String(index + 1).padStart(2, "0")}">${month}</option>`).join("");
         el.dashboardMonth.value = selected ? selected : currentMonth;
       }
-      if (el.reportMonth) {
-        const selected = el.reportMonth.value || "all";
-        el.reportMonth.innerHTML = `<option value="all">Yil bo'yicha</option>` +
-          MONTH_LABELS.map((month, index) => `<option value="${String(index + 1).padStart(2, "0")}">${month}</option>`).join("");
-        el.reportMonth.value = selected;
-      }
+      el.reportYear.innerHTML = `<option value="${currentYear}">${currentYear}</option>`;
+      el.reportMonth.innerHTML = `<option value="${currentMonth}">${MONTH_LABELS[Number(currentMonth) - 1]}</option>`;
     }
 
     function monthsForYear(year) {
@@ -1682,6 +1590,7 @@
 
     function renderReports() {
       if (!el.reportYear || !el.reportMonth) return;
+      ensureReportPeriods();
       const year = el.reportYear.value;
       const month = el.reportMonth.value;
       const months = monthsForYear(year);
@@ -1700,7 +1609,7 @@
       el.reportMonthsBody.innerHTML = visible
         .map(row => `<tr><td>${row.label}</td><td class="num">${fmt(row.income)}</td><td class="num">${fmt(row.expenses)}</td><td class="num">${money(row.income - row.expenses)}</td><td class="num">${fmt(row.founderAdvances)}</td><td class="num">${row.paymentCount}</td><td class="num">${row.expenseCount}</td></tr>`)
         .join("") + (visible.length > 1 ? `<tr class="archive-expense-row"><td>Jami</td><td class="num">${fmt(totals.income)}</td><td class="num">${fmt(totals.expenses)}</td><td class="num">${money(net)}</td><td class="num">${fmt(totals.founderAdvances)}</td><td class="num">${totals.paymentCount}</td><td class="num">${totals.expenseCount}</td></tr>` : "");
-      drawCompareChart(el.reportTrendChart, el.reportTrendLegend, months, month === "all" ? null : `${year}-${month}`);
+      drawCompareChart(el.reportTrendChart, el.reportTrendLegend, visible, `${year}-${month}`);
     }
 
     function csvCell(value) {
@@ -1710,6 +1619,7 @@
     }
 
     function exportReportCsv() {
+      ensureReportPeriods();
       const year = el.reportYear.value;
       const month = el.reportMonth.value;
       const lines = [[
@@ -1861,7 +1771,7 @@
         ? `<span><i class="dot" style="background:${c.s1}"></i>Olishi kerak</span><span><i class="dot" style="background:${c.neg}"></i>Kompaniyaga qarzdor (zarar yoki ortiqcha avans)</span>`
         : "";
       drawCompareChart(el.financeTrendChart, el.financeTrendLegend, monthsForYear(el.dashboardYear.value), el.dashboardMonth.value === "all" ? null : `${el.dashboardYear.value}-${el.dashboardMonth.value}`);
-      drawCompareChart(el.reportTrendChart, el.reportTrendLegend, monthsForYear(el.reportYear.value), el.reportMonth.value === "all" ? null : `${el.reportYear.value}-${el.reportMonth.value}`);
+      renderReports();
     }
 
     function renderUsersTable() {
@@ -2017,7 +1927,7 @@
       el.expenseForm.reset();
       el.eDate.value = today();
       toggleExpenseTypeInputs();
-      renderAllocationRows([]);
+
       setFormEditMode(el.expenseForm, el.expenseSubmitBtn, el.expenseCancelEdit, false);
       msg(el.expenseMsg, "", "");
     }
@@ -2311,26 +2221,6 @@
       el.reportYear.addEventListener("change", renderReports);
       el.reportMonth.addEventListener("change", renderReports);
       el.exportReportBtn.addEventListener("click", exportReportCsv);
-      el.eAmount.addEventListener("input", updateAllocationTotal);
-      el.expenseAllocations.addEventListener("input", updateAllocationTotal);
-      el.expenseAllocations.addEventListener("change", updateAllocationTotal);
-      el.expenseAllocations.addEventListener("click", event => {
-        const removeButton = event.target.closest("[data-remove-allocation]");
-        if (removeButton) {
-          removeButton.closest("[data-allocation-row]").remove();
-          if (!el.expenseAllocations.querySelector("[data-allocation-row]")) renderAllocationRows([]);
-          updateAllocationTotal();
-        }
-      });
-      el.addAllocationBtn.addEventListener("click", () => {
-        const rows = Array.from(el.expenseAllocations.querySelectorAll("[data-allocation-row]")).map(row => ({
-          projectId: row.querySelector("[data-allocation-project]").value,
-          fundedByProjectId: row.querySelector("[data-allocation-source]")?.value || "",
-          amount: row.querySelector("[data-allocation-amount]").value
-        }));
-        rows.push({ projectId: "", fundedByProjectId: "", amount: "" });
-        renderAllocationRows(rows);
-      });
       if (el.markPaidBtn) {
         el.markPaidBtn.addEventListener("click", async () => {
           if (!isSuperAdmin()) return;
@@ -2465,20 +2355,6 @@
         const existingExpense = editState.expenseId ? state.finance.expenses.find(x => x.id === editState.expenseId) : null;
         const expenseAmount = parseMoney(el.eAmount.value);
         if (!Number.isFinite(expenseAmount) || expenseAmount <= 0) return msg(el.expenseMsg, "Xarajat summasini raqam bilan kiriting, masalan: 250 000.", "err");
-        const allocations = readExpenseAllocations();
-        if (allocations.some(allocation => !Number.isFinite(allocation.amount))) return msg(el.expenseMsg, "Zakazga ajratilgan summani raqam bilan kiriting.", "err");
-        const uniqueProjectIds = new Set(allocations.map(allocation => allocation.projectId));
-        const allocationTotal = roundMoney(allocations.reduce((sum, allocation) => sum + allocation.amount, 0));
-        const previousIds = new Set(expenseAllocations(existingExpense || {}).flatMap(previous => [previous.projectId, previous.fundedByProjectId]).filter(Boolean));
-        const knownId = id => state.finance.projects.some(project => project.id === id) || previousIds.has(id);
-        const invalidProject = allocations.some(allocation => !knownId(allocation.projectId) || (allocation.fundedByProjectId && !knownId(allocation.fundedByProjectId)));
-        const unallocatedAdvance = isPersonExpense() && !allocations.length;
-        if (!unallocatedAdvance && (!allocations.length || invalidProject || allocations.some(allocation => !allocation.projectId || allocation.amount <= 0) ||
-            uniqueProjectIds.size !== allocations.length || Math.abs(allocationTotal - expenseAmount) >= 0.01)) {
-          return msg(el.expenseMsg, isPersonExpense()
-            ? "Zakaz tanlagan bo'lsangiz, summani to'liq taqsimlang — yoki zakazni bo'sh qoldiring."
-            : "Xarajat summasini takrorlanmagan zakazlarga to'liq taqsimlang.", "err");
-        }
         const rec = {
           id: editState.expenseId || uid(),
           date: el.eDate.value || today(),
@@ -2488,7 +2364,7 @@
           note: clean(el.eNote.value),
           workerId: null,
           founderId: null,
-          allocations
+          allocations: []
         };
         if (!rec.type || rec.type === "custom") return msg(el.expenseMsg, "Xarajat nomini yozing.", "err");
         if (!rec.date || rec.amount <= 0) return msg(el.expenseMsg, "Sana va summa to'g'ri bo'lsin.", "err");
