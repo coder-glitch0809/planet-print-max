@@ -360,7 +360,7 @@ function canAccess(req, perm) {
   return permissions.includes(perm);
 }
 
-function canGiveFounderAdvance(req) {
+function canGivePersonPayment(req) {
   return ["super_admin", "admin", "accountant"].includes(req.user?.role) || canAccess(req, "expenses");
 }
 
@@ -415,12 +415,13 @@ function visibleFinanceForUser(req, finance) {
       ? full.projects
       : canAccess(req, "designs") ? full.projects.map(designerProjectView) : [],
     workers: canAccess(req, "workers") ? full.workers : [],
+    workerOptions: canGivePersonPayment(req) && !canAccess(req, "workers") ? full.workers.map(w => ({ id: w.id, name: w.name, role: w.role, salary: w.salary })) : [],
     founders: canAccess(req, "founders") ? full.founders : [],
     // Xarajat kirituvchi (masalan admin) ta'sischilar bo'limini ko'rmasa ham ta'sischiga avans yoza olsin:
     // faqat ism va id beriladi, foiz va hisob-kitob yashirin qoladi.
-    founderOptions: canGiveFounderAdvance(req) && !canAccess(req, "founders") ? full.founders.map(f => ({ id: f.id, name: f.name })) : [],
+    founderOptions: canGivePersonPayment(req) && !canAccess(req, "founders") ? full.founders.map(f => ({ id: f.id, name: f.name })) : [],
     expenses: canAccess(req, "expenses") || canAccess(req, "reports") ? full.expenses
-      : canGiveFounderAdvance(req) ? full.expenses.filter(e => e.type === "founder_avans") : [],
+      : canGivePersonPayment(req) ? full.expenses.filter(e => PERSON_EXPENSE_TYPES.includes(e.type)) : [],
     payments: canAccess(req, "payments") || canAccess(req, "reports") ? full.payments : [],
     archives: canAccess(req, "dashboard") || canAccess(req, "projects") || canAccess(req, "expenses") || canAccess(req, "reports")
       ? full.archives.map(archive => {
@@ -476,10 +477,10 @@ function mergeFinanceForUser(req, currentFinance, incomingFinance) {
   if (canAccess(req, "workers")) next.workers = incoming.workers;
   if (canAccess(req, "founders")) next.founders = incoming.founders;
   if (canAccess(req, "expenses")) next.expenses = incoming.expenses;
-  else if (canGiveFounderAdvance(req)) {
+  else if (canGivePersonPayment(req)) {
     const existingIds = new Set(current.expenses.map(e => e.id));
     const added = incoming.expenses.filter(e => !existingIds.has(e.id));
-    if (added.some(e => e.type !== "founder_avans")) throw new HttpError(403, "Faqat ta'sischiga avans kiritishga ruxsat bor.");
+    if (added.some(e => !PERSON_EXPENSE_TYPES.includes(e.type))) throw new HttpError(403, "Faqat ishchiga oylik yoki avans va ta'sischiga avans kiritishga ruxsat bor.");
     next.expenses = [...current.expenses, ...added];
   }
   if (canAccess(req, "measurements")) next.measurements = incoming.measurements;
@@ -1210,7 +1211,7 @@ app.get("/api/finance", authRequired, async (req, res) => {
 app.put("/api/finance", authRequired, async (req, res) => {
   const finance = req.body?.finance;
   if (!finance || typeof finance !== "object") return res.status(400).json({ error: "Invalid payload" });
-  if (!FINANCE_PERMS.some((perm) => canAccess(req, perm)) && !canGiveFounderAdvance(req)) {
+  if (!FINANCE_PERMS.some((perm) => canAccess(req, perm)) && !canGivePersonPayment(req)) {
     return res.status(403).json({ error: "Forbidden" });
   }
   const clientRevision = Number(req.body?.revision);

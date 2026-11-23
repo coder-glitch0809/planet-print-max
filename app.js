@@ -275,6 +275,7 @@ const TOKEN_KEY = "pp_token_v1";
       state.finance.workers = Array.isArray(saved.workers) ? saved.workers : [];
       state.finance.founders = Array.isArray(saved.founders) ? saved.founders : [];
       // Ta'sischilar bo'limi ruxsati bo'lmasa ham xarajat kirituvchi ta'sischiga avans yoza oladi (faqat ismlar).
+      state.finance.workerOptions = Array.isArray(saved.workerOptions) ? saved.workerOptions : [];
       state.finance.founderOptions = Array.isArray(saved.founderOptions) ? saved.founderOptions : [];
       state.finance.expenses = Array.isArray(saved.expenses) ? saved.expenses : [];
       state.finance.archives = Array.isArray(saved.archives) ? saved.archives : [];
@@ -377,7 +378,7 @@ const TOKEN_KEY = "pp_token_v1";
     function isSuperAdmin() {
       return state.currentUser?.role === "super_admin";
     }
-    function founderAdvanceOnly() {
+    function personPaymentOnly() {
       return ["admin", "accountant"].includes(state.currentUser?.role) && !state.currentUser.permissions.includes("expenses");
     }
     function isClientUser() {
@@ -938,9 +939,10 @@ const TOKEN_KEY = "pp_token_v1";
       render();
       if (previous && Array.from(select.options).some(option => option.value === previous)) select.value = previous;
     }
+    const workerChoices = () => state.finance.workers.length ? state.finance.workers : (state.finance.workerOptions || []);
     const founderChoices = () => state.finance.founders.length ? state.finance.founders : (state.finance.founderOptions || []);
     function fillExpenseRelatedSelects() {
-      keepValue(el.eWorkerId, () => { el.eWorkerId.innerHTML = state.finance.workers.map(w => `<option value="${clean(w.id)}">${clean(w.name)} (${clean(w.role)})</option>`).join(""); });
+      keepValue(el.eWorkerId, () => { el.eWorkerId.innerHTML = workerChoices().map(w => `<option value="${clean(w.id)}">${clean(w.name)} (${clean(w.role)})</option>`).join(""); });
       keepValue(el.eFounderId, () => { el.eFounderId.innerHTML = founderChoices().map(f => `<option value="${clean(f.id)}">${clean(f.name)}</option>`).join(""); });
 
     }
@@ -948,10 +950,9 @@ const TOKEN_KEY = "pp_token_v1";
     const PERSON_EXPENSE_TYPES = ["oylik_avans", "oylik_tolov", "founder_avans"];
     const isPersonExpense = () => PERSON_EXPENSE_TYPES.includes(el.eType.value);
     function toggleExpenseTypeInputs() {
-      const restricted = founderAdvanceOnly();
-      Array.from(el.eType.options).forEach(option => { option.disabled = restricted && option.value !== "founder_avans"; });
-      if (restricted) el.eType.value = "founder_avans";
-      document.querySelectorAll('[data-quick-expense="oylik_avans"]').forEach(button => button.classList.toggle("hidden", restricted));
+      const restricted = personPaymentOnly();
+      Array.from(el.eType.options).forEach(option => { option.disabled = restricted && !PERSON_EXPENSE_TYPES.includes(option.value); });
+      if (restricted && !isPersonExpense()) el.eType.value = "oylik_tolov";
       const t = el.eType.value;
       const custom = t === "custom";
       el.eCustomWrap.classList.toggle("hidden", !custom);
@@ -1152,7 +1153,7 @@ const TOKEN_KEY = "pp_token_v1";
         return `<tr>
           <td>${clean(e.date)}</td><td>${EXPENSE_LABEL[e.type] || clean(e.type)}</td><td class="num">${fmt(e.amount)}</td><td>${paymentType}</td><td>${clean(target)}</td><td>${projectCell}${warning}</td><td>${clean(e.note || "-")}</td>
           <td>
-            ${founderAdvanceOnly() ? "-" : `<button class="ghost small-btn" type="button" data-edit-e="${clean(e.id)}">Tahrirlash</button>
+            ${personPaymentOnly() ? "-" : `<button class="ghost small-btn" type="button" data-edit-e="${clean(e.id)}">Tahrirlash</button>
             <button class="danger small-btn" type="button" data-del-e="${clean(e.id)}">O'chirish</button>`}
           </td>
         </tr>`;
@@ -2390,7 +2391,7 @@ const TOKEN_KEY = "pp_token_v1";
         if (rec.type === "oylik_avans" || rec.type === "oylik_tolov") {
           rec.workerId = el.eWorkerId.value;
           if (!rec.workerId) return msg(el.expenseMsg, "Ishchini tanlang.", "err");
-          const worker = state.finance.workers.find(w => w.id === rec.workerId);
+          const worker = workerChoices().find(w => w.id === rec.workerId);
           if (!worker) return msg(el.expenseMsg, "Ishchi topilmadi.", "err");
           rec.workerName = worker.name;
           const oldAmount = existingExpense?.workerId === worker.id ? num(existingExpense.amount) : 0;
