@@ -273,6 +273,38 @@ function archiveOpenCycle(finance) {
   const next = normalizeFinance(finance);
   const now = tashkentDateParts();
   if (!next.payment.currentMonth) next.payment.currentMonth = now.monthKey;
+  // Repair orders carried forward by the previous archive policy, even mid-month.
+  const carried = next.projects.filter(project => {
+    const month = project.originMonth || project.carriedFromMonth;
+    return /^\d{4}-\d{2}$/.test(month || "") && month < now.monthKey;
+  });
+  if (carried.length) {
+    next.archives = next.archives.map(archive => ({ ...archive }));
+    for (const project of carried) {
+      const month = project.originMonth || project.carriedFromMonth;
+      let archive = next.archives.find(item => item.month === month);
+      if (!archive) {
+        archive = { id: `archive-${month}`, month, archivedAt: new Date().toISOString(), projects: [], payments: [], expenses: [] };
+        next.archives.push(archive);
+      }
+      const previous = (archive.projects || []).find(item => item.id === project.id);
+      const debt = Math.max(Number(project.amount || 0) - Number(project.advance || 0), 0);
+      const closed = previous?.debtClosed === true || debt === 0;
+      const updated = { ...previous, ...project, outstandingBalance: debt, debtClosed: closed,
+        debtClosedAt: closed ? previous?.debtClosedAt || new Date().toISOString() : "" };
+      archive.projects = [...(archive.projects || []).filter(item => item.id !== project.id), updated];
+      for (const key of ["payments", "designs", "measurements"]) {
+        const linked = next[key].filter(item => item.projectId === project.id);
+        const ids = new Set(linked.map(item => item.id));
+        archive[key] = [...(archive[key] || []).filter(item => !ids.has(item.id)), ...linked];
+        next[key] = next[key].filter(item => item.projectId !== project.id);
+      }
+      next.payment.lastArchiveMonth = month;
+    }
+    const ids = new Set(carried.map(project => project.id));
+    next.projects = next.projects.filter(project => !ids.has(project.id));
+    next.archives.sort((a, b) => String(b.month).localeCompare(String(a.month)));
+  }
   if (next.payment.currentMonth >= now.monthKey) return next;
 
   const archivedMonth = next.payment.currentMonth;

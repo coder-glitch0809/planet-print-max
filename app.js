@@ -1325,6 +1325,13 @@ const TOKEN_KEY = "pp_token_v1";
 
     function ledgerRows() {
       const rows = [];
+      const projectMonths = new Map();
+      (state.finance.archives || []).forEach(archive => (archive.projects || []).forEach(project => {
+        projectMonths.set(project.id, project.originMonth || project.carriedFromMonth || String(project.startDate || "").slice(0, 7) || archive.month);
+      }));
+      state.finance.projects.forEach(project => {
+        projectMonths.set(project.id, project.originMonth || project.carriedFromMonth || String(project.startDate || "").slice(0, 7));
+      });
       (state.finance.archives || []).forEach(archive => {
         const fallbackMonth = String(archive.month || "");
         (archive.payments || []).forEach(payment => rows.push({ kind: "income", record: payment, fallbackMonth, archived: true }));
@@ -1336,7 +1343,10 @@ const TOKEN_KEY = "pp_token_v1";
         ...row,
         // Ta'sischi avansi foydani taqsimlash: xarajat emas, alohida hisoblanadi.
         kind: row.kind === "expense" && row.record.type === "founder_avans" ? "founder" : row.kind,
-        month: /^\d{4}-\d{2}/.test(String(row.record.date || ""))
+        // Order income belongs to the order's month; retain the actual payment date.
+        month: row.kind === "income" && /^\d{4}-\d{2}$/.test(projectMonths.get(row.record.projectId) || "")
+          ? projectMonths.get(row.record.projectId)
+          : /^\d{4}-\d{2}/.test(String(row.record.date || ""))
           ? String(row.record.date).slice(0, 7)
           : row.fallbackMonth
       }));

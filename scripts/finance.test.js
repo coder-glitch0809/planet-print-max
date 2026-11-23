@@ -251,3 +251,52 @@ test('report controls always select the current Tashkent month', () => {
   assert.equal(el.reportYear.innerHTML, '<option value="2027">2027</option>');
   assert.equal(el.reportMonth.innerHTML, '<option value="01">1</option>');
 });
+
+test('existing carried orders are archived mid-month without losing updates or duplicating records', async t => {
+  const { exports, store, request } = await startServer(t);
+  const now = monthKey(new Date());
+  const finance = {
+    payment: { currentMonth: now, lastPaidMonth: now },
+    projects: [
+      { id: 'old', name: 'Old order', originMonth: '2020-01', carriedFromMonth: '2020-02', amount: 1000, advance: 700, status: 'Yakunlangan' },
+      { id: 'new', name: 'Current order', startDate: now + '-01', amount: 500, advance: 0 }
+    ],
+    payments: [{ id: 'later', projectId: 'old', amount: 500, date: now + '-01' }],
+    designs: [{ id: 'design', projectId: 'old' }],
+    archives: [{ id: 'archive-2020-01', month: '2020-01', projects: [{ id: 'old', amount: 1000, advance: 200 }], payments: [{ id: 'initial', projectId: 'old', amount: 200, date: '2020-01-01' }] }]
+  };
+  const original = JSON.stringify(finance);
+  const fixed = exports.archiveOpenCycle(finance);
+  assert.equal(JSON.stringify(finance), original, 'migration must not mutate the input snapshot');
+  assert.deepEqual(Array.from(fixed.projects, p => p.id), ['new']);
+  assert.equal(fixed.archives[0].projects.length, 1);
+  assert.equal(fixed.archives[0].projects[0].advance, 700);
+  assert.equal(fixed.archives[0].projects[0].outstandingBalance, 300);
+  assert.equal(fixed.archives[0].projects[0].status, 'Yakunlangan');
+  assert.equal(fixed.archives[0].payments.length, 2);
+  assert.equal(fixed.archives[0].payments[1].date, now + '-01');
+  assert.equal(fixed.archives[0].designs.length, 1);
+  assert.equal(fixed.payments.length, 0);
+  assert.equal(JSON.stringify(exports.archiveOpenCycle(fixed)), JSON.stringify(fixed));
+  store.finance = finance;
+  const response = await request('/api/finance');
+  assert.equal(response.status, 200);
+  assert.equal(store.finance.projects.length, 1, 'GET persists the repair');
+  assert.equal(store.finance.archives[0].projects[0].advance, 700);
+});
+
+test('monthly income follows the order month while payment dates and weekly cash flow remain intact', () => {
+  const source = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const body = source.match(/function ledgerRows\(\) \{[\s\S]*?\n    \}/)[0];
+  const state = { finance: {
+    archives: [{ month: '2026-10', projects: [{ id: 'old', originMonth: '2026-10' }], payments: [{ id: 'p1', projectId: 'old', amount: 7800000, date: '2026-11-17' }] }],
+    projects: [{ id: 'new', startDate: '2026-11-01' }],
+    payments: [{ id: 'p2', projectId: 'new', date: '2026-11-20', amount: 100 }],
+    expenses: [{ id: 'e', date: '2026-11-20', amount: 10 }]
+  } };
+  const rows = vm.runInNewContext(body + '; ledgerRows();', { state });
+  assert.equal(rows.find(r => r.record.id === 'p1').month, '2026-10');
+  assert.equal(rows.find(r => r.record.id === 'p1').record.date, '2026-11-17');
+  assert.equal(rows.filter(r => r.month === '2026-11' && r.kind === 'income').reduce((sum, r) => sum + r.record.amount, 0), 100);
+  assert.equal(rows.find(r => r.record.id === 'e').month, '2026-11');
+});
